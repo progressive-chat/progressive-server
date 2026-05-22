@@ -16,12 +16,11 @@ jobs:
         ubuntu: ["24.04", "26.04"]
         build_type: [Debug, Release]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update          sudo apt-get install -y \
             build-essential cmake ninja-build pkg-config \
             libboost-dev libboost-url-dev libboost-json-dev \
             libssl-dev libpq-dev libsqlite3-dev \
@@ -43,19 +42,19 @@ jobs:
     name: macOS, C++23
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
           brew install cmake ninja boost nlohmann-json openssl libpq sqlite3 googletest
-          brew link --force openssl
+          echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl)" >> $GITHUB_ENV
 
       - name: Configure CMake
         run: >
           cmake -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DPROGRESSIVE_BUILD_TESTS=ON
-          -DOPENSSL_ROOT_DIR=$(brew --prefix openssl)
+          -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"
 
       - name: Build
         run: cmake --build build --parallel $(sysctl -n hw.logicalcpu)

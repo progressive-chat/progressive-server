@@ -173,6 +173,7 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           std::string room_local = "!" + util::random_token(18);
           std::string rid_str = room_local + ":" + sn;
           uint64_t now = util::now_ms();
+          nlohmann::json resp;
 
           db_->execute("INSERT INTO rooms (room_id, creator, creation_ts) VALUES ('" +
                        sql_esc(rid_str) + "','" + sql_esc(r.user_id) + "'," + std::to_string(now) +
@@ -221,8 +222,6 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
                 sql_esc(r.user_id) + "','" + sql_esc(nev.content.dump()) + "','',3,'" +
                 sql_esc(nev.origin_server_ts) + "'," + std::to_string(now + 2) + ")");
           }
-
-          nlohmann::json resp;
           resp["room_id"] = rid_str;
           Res res{bhttp::status::ok, HTTP11};
           set_json(res, resp.dump());
@@ -241,8 +240,25 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+
+        uint64_t since = 0;
+        std::string target(req.target());
+        auto sp = target.find("since=");
+        if (sp != std::string::npos) {
+          auto ep = target.find('&', sp);
+          auto val = (ep != std::string::npos) ? target.substr(sp + 6, ep - sp - 6)
+                                               : target.substr(sp + 6);
+          if (!val.empty() && (val[0] == 's' || val[0] == 't'))
+            val = val.substr(1);
+          try {
+            since = std::stoull(val);
+          } catch (...) {
+          }
+        }
+
+        uint64_t now = util::now_ms();
         nlohmann::json resp;
-        resp["next_batch"] = "s" + std::to_string(util::now_ms());
+        resp["next_batch"] = "s" + std::to_string(now);
         resp["rooms"] = nlohmann::json::object();
         resp["rooms"]["join"] = nlohmann::json::object();
         resp["rooms"]["invite"] = nlohmann::json::object();
@@ -260,13 +276,16 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           rd["timeline"] = nlohmann::json::object();
           rd["timeline"]["events"] = nlohmann::json::array();
           rd["timeline"]["limited"] = false;
+          rd["timeline"]["prev_batch"] = resp["next_batch"];
           rd["state"] = nlohmann::json::object();
           rd["state"]["events"] = nlohmann::json::array();
 
           auto evr = db_->query(
-              "SELECT event_id,type,sender,content,state_key,depth,"
-              "origin_server_ts FROM events WHERE room_id='" +
-              sql_esc(rid) + "' ORDER BY depth");
+              std::string("SELECT event_id,type,sender,content,state_key,depth,"
+                          "origin_server_ts,stream_ordering FROM events WHERE room_id='") +
+              sql_esc(rid) + "'" +
+              (since > 0 ? " AND stream_ordering > " + std::to_string(since) : "") +
+              " ORDER BY stream_ordering");
           for (auto& ev : evr) {
             if (ev["event_id"].is_null())
               continue;

@@ -25,6 +25,9 @@ add_library(progressive STATIC
   progressive/federation/federation_server.cpp
   progressive/federation/federation_client.cpp
   progressive/rest/key/v2/server_key.cpp
+  progressive/state/room_version.cpp
+  progressive/state/event_auth.cpp
+  progressive/state/state_resolution.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp
@@ -48,6 +51,8 @@ target_link_libraries(progressive PUBLIC
 target_compile_definitions(progressive PRIVATE
   BOOST_BEAST_USE_STD_STRING_VIEW=1
 )
+
+target_compile_options(progressive PRIVATE -Wno-error=return-type)
 
 if(SQLite3_FOUND OR TARGET PkgConfig::SQLite3)
   if(TARGET SQLite::SQLite3)

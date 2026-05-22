@@ -74,8 +74,9 @@ int main(int argc, char* argv[]) {
       return generate_config();
     }
     if (arg == "--generate-keys") {
-      auto key = progressive::crypto::generate_signing_key();
-      std::cout << "signing_key: \"" << key.value("key", "") << "\"\n";
+      auto key = progressive::crypto::generate_ed25519_keypair();
+      std::cout << "public_key: \"" << key.public_key_b64() << "\"\n";
+      std::cout << "key_id: \"" << key.key_id() << "\"\n";
       return 0;
     }
     if ((arg == "-c" || arg == "--config") && i + 1 < argc) {

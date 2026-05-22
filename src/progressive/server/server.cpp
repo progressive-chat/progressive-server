@@ -114,9 +114,12 @@ void Server::setup() {
   // Register federation routes
   federation::register_federation_routes(*db_, router_, config_.server.server_name);
 
-  // Register key server routes
-  auto signing_key = crypto::SigningKey("v0", {});
-  federation::register_key_routes(signing_key, router_, config_.server.server_name);
+  // Register key server routes — with real ed25519 key
+  signing_key_ = crypto::generate_ed25519_keypair();
+  federation::register_key_routes(signing_key_, router_, config_.server.server_name);
+
+  std::cout << "[progressive] signing key: " << signing_key_.key_id() << " ("
+            << signing_key_.public_key_b64().substr(0, 12) << "...)\n";
 
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {

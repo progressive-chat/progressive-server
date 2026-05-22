@@ -10,7 +10,7 @@
 
 namespace progressive::federation {
 
-void register_key_routes(const crypto::SigningKey& key, progressive::http::Router& router,
+void register_key_routes(const crypto::Ed25519Keypair& key, progressive::http::Router& router,
                          std::string_view server_name);
 
 }

@@ -26,7 +26,7 @@ bool RateLimiter::allow(std::string_view key) {
 
   auto it = buckets_.find(key);
   if (it == buckets_.end()) {
-    buckets_[std::string(key)] = {burst_ - 1, util::now_ms()};
+    buckets_[std::string(key)] = {burst_ - 1, static_cast<int64_t>(util::now_ms())};
     return true;
   }
 

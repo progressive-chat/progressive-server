@@ -63,7 +63,7 @@ void Server::setup() {
       static std::map<std::string, int, std::less<>> ip_counts;
       static std::mutex ip_mutex;
 
-      auto ip_addr = std::string(req[boost_http::field::x_forwarded_for]);
+      auto ip_addr = std::string(req["X-Forwarded-For"]);
       if (ip_addr.empty())
         ip_addr = "127.0.0.1";
 

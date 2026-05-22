@@ -4,7 +4,11 @@
 #include <iostream>
 #include <thread>
 
+#include "../crypto/signing.hpp"
+#include "../federation/auth.hpp"
+#include "../federation/federation_server.hpp"
 #include "../rest/client/endpoints.hpp"
+#include "../rest/key/v2/server_key.hpp"
 
 namespace progressive::server {
 
@@ -106,6 +110,13 @@ void Server::setup() {
 
   // Register REST routes
   rest::client::register_routes(*this, router_);
+
+  // Register federation routes
+  federation::register_federation_routes(*db_, router_, config_.server.server_name);
+
+  // Register key server routes
+  auto signing_key = crypto::SigningKey("v0", {});
+  federation::register_key_routes(signing_key, router_, config_.server.server_name);
 
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {

@@ -21,6 +21,10 @@ add_library(progressive STATIC
   progressive/http/router.cpp
   progressive/auth/auth.cpp
   progressive/rest/client/endpoints.cpp
+  progressive/federation/auth.cpp
+  progressive/federation/federation_server.cpp
+  progressive/federation/federation_client.cpp
+  progressive/rest/key/v2/server_key.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

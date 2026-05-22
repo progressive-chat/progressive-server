@@ -1,0 +1,12 @@
+build/
+build-test/
+*.o
+*.a
+*.so
+progressive.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+CMakeUserPresets.json

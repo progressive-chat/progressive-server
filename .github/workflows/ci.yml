@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ["24.04", "26.04"]
+        ubuntu: ["24.04", "latest"]
         build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v5
@@ -65,7 +65,7 @@ jobs:
 
   clang-build:
     name: Clang ${{ matrix.clang }}, C++23
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         clang: [18, 19, 20]
@@ -95,7 +95,7 @@ jobs:
 
   lint:
     name: Lint (clang-tidy)
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

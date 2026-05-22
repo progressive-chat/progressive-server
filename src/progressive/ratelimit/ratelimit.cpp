@@ -1,0 +1,41 @@
+#include "ratelimit.hpp"
+
+#include <algorithm>
+
+#include "../util/time.hpp"
+
+namespace progressive::ratelimit {
+
+RateLimiter::RateLimiter(double rate_per_sec, double burst)
+    : rate_per_sec_(rate_per_sec), burst_(burst) {}
+
+void RateLimiter::set_rate(double rate_per_sec, double burst) {
+  rate_per_sec_ = rate_per_sec;
+  burst_ = burst;
+}
+
+void RateLimiter::refill(Bucket& b) const {
+  int64_t now = util::now_ms();
+  int64_t elapsed = now - b.last_refill_ms;
+  b.tokens = std::min(burst_, b.tokens + (elapsed / 1000.0) * rate_per_sec_);
+  b.last_refill_ms = now;
+}
+
+bool RateLimiter::allow(std::string_view key) {
+  std::lock_guard lock(mutex_);
+
+  auto it = buckets_.find(key);
+  if (it == buckets_.end()) {
+    buckets_[std::string(key)] = {burst_ - 1, util::now_ms()};
+    return true;
+  }
+
+  refill(it->second);
+  if (it->second.tokens >= 1.0) {
+    it->second.tokens -= 1.0;
+    return true;
+  }
+  return false;
+}
+
+}  // namespace progressive::ratelimit

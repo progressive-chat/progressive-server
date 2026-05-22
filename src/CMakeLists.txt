@@ -25,6 +25,7 @@ add_library(progressive STATIC
   progressive/federation/auth.cpp
   progressive/federation/federation_server.cpp
   progressive/federation/federation_client.cpp
+  progressive/ratelimit/ratelimit.cpp
   progressive/rest/key/v2/server_key.cpp
   progressive/state/room_version.cpp
   progressive/state/event_auth.cpp

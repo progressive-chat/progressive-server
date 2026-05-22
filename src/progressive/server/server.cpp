@@ -59,6 +59,28 @@ void Server::setup() {
     http_server_ = std::make_unique<http::HttpServer>(ioc_, listener.bind_address, listener.port);
 
     http_server_->set_handler([this](boost_http::request<boost_http::string_body>&& req) {
+      // Simple rate limit: track request count per IP in a map
+      static std::map<std::string, int, std::less<>> ip_counts;
+      static std::mutex ip_mutex;
+
+      auto ip_addr = std::string(req[boost_http::field::x_forwarded_for]);
+      if (ip_addr.empty())
+        ip_addr = "127.0.0.1";
+
+      {
+        std::lock_guard lock(ip_mutex);
+        ip_counts[std::string(ip_addr)]++;
+        int count = ip_counts[std::string(ip_addr)];
+        if (count > 100) {
+          boost_http::response<boost_http::string_body> res{boost_http::status::too_many_requests,
+                                                            11};
+          progressive::http::set_json(
+              res, R"({"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"})");
+          progressive::http::set_cors(res);
+          return res;
+        }
+      }
+
       return router_.route(std::move(req));
     });
   }

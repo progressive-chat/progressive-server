@@ -8,6 +8,7 @@
 #include "../crypto/signing.hpp"
 #include "../http/router.hpp"
 #include "../http/server.hpp"
+#include "../ratelimit/ratelimit.hpp"
 #include "../storage/database.hpp"
 
 namespace progressive::server {
@@ -26,6 +27,7 @@ public:
   storage::DatabasePool& db() { return *db_; }
   boost::asio::io_context& io() { return ioc_; }
   crypto::Ed25519Keypair& signing_key() { return signing_key_; }
+  ratelimit::RateLimiter& rate_limiter() { return rate_limiter_; }
 
 private:
   config::Config config_;
@@ -34,6 +36,7 @@ private:
   std::unique_ptr<http::HttpServer> http_server_;
   http::Router router_;
   crypto::Ed25519Keypair signing_key_;
+  ratelimit::RateLimiter rate_limiter_{50.0, 100.0};
   bool running_ = false;
 };
 

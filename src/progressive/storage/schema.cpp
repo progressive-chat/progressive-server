@@ -1,4 +1,5 @@
 #include "schema.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>

@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ubuntu-build:
+    name: Ubuntu ${{ matrix.ubuntu }}, C++23
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libssl-dev libpq-dev libsqlite3-dev \
+            nlohmann-json3-dev libgtest-dev
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DPROGRESSIVE_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Test
+        run: cd build && ctest --output-on-failure
+
+  macos-build:
+    name: macOS, C++23
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja boost nlohmann-json openssl libpq sqlite3 googletest
+          brew link --force openssl
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPROGRESSIVE_BUILD_TESTS=ON
+          -DOPENSSL_ROOT_DIR=$(brew --prefix openssl)
+
+      - name: Build
+        run: cmake --build build --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Test
+        run: cd build && ctest --output-on-failure
+
+  clang-build:
+    name: Clang ${{ matrix.clang }}, C++23
+    runs-on: ubuntu-26.04
+    strategy:
+      matrix:
+        clang: [18, 19, 20]
+    env:
+      CC: clang-${{ matrix.clang }}
+      CXX: clang++-${{ matrix.clang }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM + build deps
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository -y "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-${{ matrix.clang }} main"
+          sudo apt-get update
+          sudo apt-get install -y clang-${{ matrix.clang }} lld-${{ matrix.clang }} \
+            cmake ninja-build pkg-config \
+            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libssl-dev libpq-dev libsqlite3-dev nlohmann-json3-dev libgtest-dev
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+  lint:
+    name: Lint (clang-tidy)
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy clang-format cmake ninja-build \
+            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libssl-dev libpq-dev libsqlite3-dev nlohmann-json3-dev
+
+      - name: clang-format check
+        run: find src tests -name '*.cpp' -o -name '*.hpp' | xargs clang-format --dry-run -Werror
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_CXX_CLANG_TIDY="clang-tidy"
+
+      - name: Build with clang-tidy
+        run: cmake --build build --parallel $(nproc)

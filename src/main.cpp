@@ -39,10 +39,12 @@ server_name: "localhost"
 public_baseurl: "http://localhost:8008/"
 listeners:
   - port: 8008
-    bind_addresses: ["127.0.0.1"]
+    bind_addresses:
+      - "127.0.0.1"
     type: http
   - port: 8448
-    bind_addresses: ["127.0.0.1"]
+    bind_addresses:
+      - "127.0.0.1"
     type: http
 
 database:

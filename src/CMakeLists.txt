@@ -6,6 +6,7 @@ add_library(progressive STATIC
   progressive/config/config.cpp
   progressive/config/server_config.cpp
   progressive/config/database_config.cpp
+  progressive/config/yaml.cpp
   progressive/events/event.cpp
   progressive/events/event_factory.cpp
   progressive/events/unsafe_event.cpp

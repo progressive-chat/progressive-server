@@ -3,14 +3,12 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "yaml.hpp"
+
 namespace progressive::config {
 
 Config Config::load(std::string_view path) {
-  std::ifstream f{std::string(path)};
-  if (!f)
-    throw std::runtime_error("cannot open config file: " + std::string(path));
-
-  nlohmann::json j = nlohmann::json::parse(f);
+  nlohmann::json j = load_config_file(path);
   Config cfg;
   cfg.config_path = std::string(path);
 
@@ -21,7 +19,11 @@ Config Config::load(std::string_view path) {
     for (auto& l : j["listeners"]) {
       ListenerConfig lc;
       lc.port = l.value("port", 8008);
-      lc.bind_address = l.value("bind_addresses", std::vector<std::string>{"127.0.0.1"})[0];
+      auto& ba = l["bind_addresses"];
+      if (ba.is_array() && !ba.empty())
+        lc.bind_address = ba[0].get<std::string>();
+      else if (ba.is_string())
+        lc.bind_address = ba.get<std::string>();
       lc.type = l.value("type", std::string{"http"});
       lc.tls = l.value("tls", false);
       cfg.server.listeners.push_back(lc);

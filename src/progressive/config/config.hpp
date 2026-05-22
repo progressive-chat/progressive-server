@@ -14,6 +14,8 @@ struct ListenerConfig {
   std::string type = "http";  // http, https, unix
   bool tls = false;
   std::string resource;  // client, federation
+  std::string tls_cert_path;
+  std::string tls_key_path;
 };
 
 struct ServerConfigSection {

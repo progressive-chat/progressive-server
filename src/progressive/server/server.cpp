@@ -56,7 +56,9 @@ void Server::setup() {
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {
     auto& listener = config_.server.listeners[0];
-    http_server_ = std::make_unique<http::HttpServer>(ioc_, listener.bind_address, listener.port);
+    http_server_ =
+        std::make_unique<http::HttpServer>(ioc_, listener.bind_address, listener.port, listener.tls,
+                                           listener.tls_cert_path, listener.tls_key_path);
 
     http_server_->set_handler([this](boost_http::request<boost_http::string_body>&& req) {
       // Simple rate limit: track request count per IP in a map
@@ -113,7 +115,7 @@ void Server::run() {
   setup();
   start();
 
-  net::signal_set signals(ioc_, SIGINT, SIGTERM);
+  boost::asio::signal_set signals(ioc_, SIGINT, SIGTERM);
   signals.async_wait([this](boost::system::error_code, int) { stop(); });
 
   ioc_.run();

@@ -314,6 +314,79 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_sync");
 
+  // room redact
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          std::string reason = body.value("reason", std::string{});
+
+          // Check event exists in this room
+          auto rows = db_->query("SELECT * FROM events WHERE event_id='" + sql_esc(p["eventId"]) +
+                                 "' AND room_id='" + sql_esc(p["roomId"]) + "'");
+          if (rows.empty() || rows[0]["event_id"].is_null())
+            return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Event not found");
+
+          // Create redaction event
+          auto rid = RoomID::from_string(p["roomId"]);
+          nlohmann::json redact_content;
+          redact_content["reason"] = reason;
+          redact_content["redacts"] = p["eventId"];
+
+          auto redact_ev =
+              events::create_local_event(rid, "m.room.redaction", r.user_id, redact_content);
+          redact_ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+
+          uint64_t now = util::now_ms();
+          db_->execute(
+              "INSERT INTO events "
+              "(event_id,room_id,type,sender,content,state_key,depth,"
+              "origin_server_ts,stream_ordering) VALUES ('" +
+              sql_esc(redact_ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) +
+              "','m.room.redaction','" + sql_esc(r.user_id) + "','" +
+              sql_esc(redact_ev.content.dump()) + "','',1,'" + sql_esc(redact_ev.origin_server_ts) +
+              "'," + std::to_string(now) + ")");
+
+          // Mark the redacted event
+          nlohmann::json redacts;
+          redacts["event_id"] = redact_ev.event_id.to_string();
+          redacts["type"] = "m.room.redaction";
+          redacts["sender"] = r.user_id;
+          redacts["origin_server_ts"] = redact_ev.origin_server_ts;
+          redacts["content"] = redact_content;
+
+          db_->execute(
+              "UPDATE events SET content = content || "
+              "'\"redacted_because\":" +
+              sql_esc(redacts.dump()) + "}' WHERE event_id='" + sql_esc(p["eventId"]) + "'");
+
+          nlohmann::json resp;
+          resp["event_id"] = redact_ev.event_id.to_string();
+          Res res{bhttp::status::ok, HTTP11};
+          set_json(res, resp.dump());
+          set_cors(res);
+          return res;
+        } catch (const std::exception& e) {
+          return error_response(bhttp::status::internal_server_error, "M_UNKNOWN", e.what());
+        }
+      },
+      "client_redact");
+
+  // room directory (alias lookup)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/directory/room/{roomAlias}",
+      [db_](Req&&, Params p) -> Res {
+        auto alias = p["roomAlias"];
+        // Lookup: currently no alias table, return not found
+        return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Room alias not found");
+      },
+      "client_directory");
+
   // CORS options
   router.add_route(
       bhttp::verb::options, "/*",

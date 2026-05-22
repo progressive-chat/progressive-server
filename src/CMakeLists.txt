@@ -17,6 +17,10 @@ add_library(progressive STATIC
   progressive/storage/database.cpp
   progressive/storage/engine.cpp
   progressive/storage/schema.cpp
+  progressive/http/server.cpp
+  progressive/http/router.cpp
+  progressive/auth/auth.cpp
+  progressive/rest/client/endpoints.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

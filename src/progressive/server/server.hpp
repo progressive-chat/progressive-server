@@ -5,6 +5,8 @@
 #include <string_view>
 
 #include "../config/config.hpp"
+#include "../http/router.hpp"
+#include "../http/server.hpp"
 #include "../storage/database.hpp"
 
 namespace progressive::server {
@@ -27,6 +29,8 @@ private:
   config::Config config_;
   boost::asio::io_context ioc_;
   std::unique_ptr<storage::DatabasePool> db_;
+  std::unique_ptr<http::HttpServer> http_server_;
+  http::Router router_;
   bool running_ = false;
 };
 

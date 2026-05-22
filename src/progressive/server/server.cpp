@@ -1,15 +1,10 @@
 #include "server.hpp"
 
 #include <boost/asio/signal_set.hpp>
-#include <boost/beast/core.hpp>
-#include <boost/beast/http.hpp>
 #include <iostream>
 #include <thread>
 
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace net = boost::asio;
-using tcp = net::ip::tcp;
+#include "../rest/client/endpoints.hpp"
 
 namespace progressive::server {
 
@@ -20,7 +15,6 @@ Server::~Server() {
 }
 
 void Server::setup() {
-  // Database connection
   std::string conn = "sqlite://progressive.db";
   if (!config_.database.databases.empty()) {
     auto& dbcfg = config_.database.databases[0];
@@ -38,13 +32,11 @@ void Server::setup() {
   }
   db_ = storage::DatabasePool::create(conn);
 
-  // Apply initial schema
   db_->execute(R"(
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER PRIMARY KEY,
       applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       password_hash TEXT,
@@ -52,7 +44,6 @@ void Server::setup() {
       admin INTEGER DEFAULT 0,
       deactivated INTEGER DEFAULT 0
     );
-
     CREATE TABLE IF NOT EXISTS rooms (
       room_id TEXT PRIMARY KEY,
       is_public INTEGER DEFAULT 0,
@@ -60,7 +51,6 @@ void Server::setup() {
       room_version INTEGER DEFAULT 10,
       creation_ts BIGINT NOT NULL
     );
-
     CREATE TABLE IF NOT EXISTS events (
       event_id TEXT PRIMARY KEY,
       room_id TEXT NOT NULL,
@@ -73,11 +63,9 @@ void Server::setup() {
       outlier INTEGER DEFAULT 0,
       stream_ordering INTEGER
     );
-
     CREATE INDEX IF NOT EXISTS events_room_id ON events(room_id);
     CREATE INDEX IF NOT EXISTS events_stream_ordering ON events(stream_ordering);
     CREATE INDEX IF NOT EXISTS events_type ON events(type);
-
     CREATE TABLE IF NOT EXISTS state_events (
       event_id TEXT NOT NULL,
       room_id TEXT NOT NULL,
@@ -85,9 +73,7 @@ void Server::setup() {
       state_key TEXT NOT NULL,
       PRIMARY KEY (room_id, type, state_key)
     );
-
     CREATE INDEX IF NOT EXISTS state_events_event ON state_events(event_id);
-
     CREATE TABLE IF NOT EXISTS access_tokens (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       token TEXT NOT NULL UNIQUE,
@@ -95,9 +81,7 @@ void Server::setup() {
       device_id TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-
     CREATE INDEX IF NOT EXISTS access_tokens_token ON access_tokens(token);
-
     CREATE TABLE IF NOT EXISTS room_memberships (
       event_id TEXT NOT NULL,
       room_id TEXT NOT NULL,
@@ -107,13 +91,11 @@ void Server::setup() {
       content TEXT,
       PRIMARY KEY (room_id, user_id)
     );
-
     CREATE TABLE IF NOT EXISTS event_auth (
       event_id TEXT NOT NULL,
       auth_id TEXT NOT NULL,
       PRIMARY KEY (event_id, auth_id)
     );
-
     CREATE TABLE IF NOT EXISTS destinations (
       destination TEXT PRIMARY KEY,
       retry_interval BIGINT DEFAULT 0,
@@ -122,12 +104,28 @@ void Server::setup() {
     );
   )");
 
+  // Register REST routes
+  rest::client::register_routes(*this, router_);
+
+  // Start HTTP server on the first listener
+  if (!config_.server.listeners.empty()) {
+    auto& listener = config_.server.listeners[0];
+    http_server_ = std::make_unique<http::HttpServer>(ioc_, listener.bind_address, listener.port);
+
+    http_server_->set_handler([this](boost_http::request<boost_http::string_body>&& req) {
+      return router_.route(std::move(req));
+    });
+  }
+
   std::cout << "[progressive] server '" << config_.server.server_name << "' setup complete\n";
   std::cout << "[progressive] database: " << db_->driver_name() << "\n";
 }
 
 void Server::start() {
   running_ = true;
+  if (http_server_) {
+    http_server_->start();
+  }
   std::cout << "[progressive] server '" << config_.server.server_name << "' started\n";
   for (auto& listener : config_.server.listeners) {
     std::cout << "[progressive] listening on " << listener.bind_address << ":" << listener.port

@@ -13,6 +13,7 @@ struct Requester {
   std::optional<std::string> device_id;
   std::optional<std::string> app_service_id;
 
+  Requester() : user("_", "_") {}
   Requester(UserID user, std::optional<std::string> access_token_id = {})
       : user(std::move(user)), access_token_id(std::move(access_token_id)) {}
 };

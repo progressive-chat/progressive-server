@@ -23,7 +23,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build pkg-config \
-            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libboost-dev libboost-url-dev libboost-json-dev \
             libssl-dev libpq-dev libsqlite3-dev \
             nlohmann-json3-dev libgtest-dev
 
@@ -82,7 +82,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-${{ matrix.clang }} lld-${{ matrix.clang }} \
             cmake ninja-build pkg-config \
-            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libboost-dev libboost-url-dev libboost-json-dev \
             libssl-dev libpq-dev libsqlite3-dev nlohmann-json3-dev libgtest-dev
 
       - name: Configure CMake
@@ -103,7 +103,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-tidy clang-format cmake ninja-build \
-            libboost-system-dev libboost-beast-dev libboost-url-dev libboost-json-dev \
+            libboost-dev libboost-url-dev libboost-json-dev \
             libssl-dev libpq-dev libsqlite3-dev nlohmann-json3-dev
 
       - name: clang-format check

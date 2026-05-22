@@ -1,17 +1,27 @@
 #pragma once
+#include <cstdint>
+#include <map>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <map>
-#include <optional>
-#include <cstdint>
+
 #include "../types/matrix_id.hpp"
 
 namespace progressive::events {
 
 enum class RoomVersion : uint8_t {
-  V1 = 1, V2 = 2, V3 = 3, V4 = 4, V5 = 5, V6 = 6,
-  V7 = 7, V8 = 8, V9 = 9, V10 = 10, V11 = 11,
+  V1 = 1,
+  V2 = 2,
+  V3 = 3,
+  V4 = 4,
+  V5 = 5,
+  V6 = 6,
+  V7 = 7,
+  V8 = 8,
+  V9 = 9,
+  V10 = 10,
+  V11 = 11,
 };
 
 struct EventContent {
@@ -58,10 +68,7 @@ public:
   Signatures signatures;
   RoomVersion room_version = RoomVersion::V10;
 
-  Event()
-    : event_id("_", "_")
-    , room_id("_", "_")
-  {}
+  Event() : event_id("_", "_"), room_id("_", "_") {}
 
   nlohmann::json to_json() const;
   static Event from_json(const nlohmann::json& j);
@@ -70,4 +77,4 @@ public:
   std::string state_key_str() const { return state_key.value_or(""); }
 };
 
-}
+}  // namespace progressive::events

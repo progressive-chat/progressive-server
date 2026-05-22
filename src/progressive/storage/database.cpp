@@ -1,8 +1,10 @@
 #include "database.hpp"
-#include <stdexcept>
-#include <sstream>
-#include <vector>
+
 #include <sqlite3.h>
+
+#include <sstream>
+#include <stdexcept>
+#include <vector>
 #ifdef PROGRESSIVE_HAS_POSTGRES
 #include <libpq-fe.h>
 #endif
@@ -21,7 +23,10 @@ public:
     sqlite3_exec(db_, "PRAGMA foreign_keys=ON", nullptr, nullptr, nullptr);
   }
 
-  ~SqlitePool() override { if (db_) sqlite3_close(db_); }
+  ~SqlitePool() override {
+    if (db_)
+      sqlite3_close(db_);
+  }
 
   void execute(std::string_view sql) override {
     char* err = nullptr;
@@ -44,8 +49,10 @@ public:
       for (int i = 0; i < cols; i++) {
         const char* name = sqlite3_column_name(stmt, i);
         const unsigned char* text = sqlite3_column_text(stmt, i);
-        if (text) row[name] = std::string(reinterpret_cast<const char*>(text));
-        else row[name] = nlohmann::json(nullptr);
+        if (text)
+          row[name] = std::string(reinterpret_cast<const char*>(text));
+        else
+          row[name] = nlohmann::json(nullptr);
       }
       rows.push_back(row);
     }
@@ -74,7 +81,10 @@ public:
     }
   }
 
-  ~PostgresPool() override { if (conn_) PQfinish(conn_); }
+  ~PostgresPool() override {
+    if (conn_)
+      PQfinish(conn_);
+  }
 
   void execute(std::string_view sql) override {
     PGresult* res = PQexec(conn_, std::string(sql).c_str());
@@ -101,8 +111,10 @@ public:
       for (int c = 0; c < ncols; c++) {
         const char* name = PQfname(res, c);
         const char* val = PQgetvalue(res, r, c);
-        if (val) row[name] = std::string(val);
-        else row[name] = nlohmann::json(nullptr);
+        if (val)
+          row[name] = std::string(val);
+        else
+          row[name] = nlohmann::json(nullptr);
       }
       rows.push_back(row);
     }
@@ -116,7 +128,7 @@ public:
   std::string driver_name() const override { return "postgresql"; }
 };
 
-#endif // PROGRESSIVE_HAS_POSTGRES
+#endif  // PROGRESSIVE_HAS_POSTGRES
 
 std::unique_ptr<DatabasePool> DatabasePool::create(std::string_view conn_string) {
   std::string cs(conn_string);
@@ -134,4 +146,4 @@ std::unique_ptr<DatabasePool> DatabasePool::create(std::string_view conn_string)
   throw std::runtime_error("unsupported database: " + cs);
 }
 
-}
+}  // namespace progressive::storage

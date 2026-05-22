@@ -1,8 +1,8 @@
 #pragma once
-#include <string>
-#include <string_view>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <string>
+#include <string_view>
 
 namespace progressive::storage {
 
@@ -19,4 +19,4 @@ public:
   static std::unique_ptr<DatabasePool> create(std::string_view conn_string);
 };
 
-}
+}  // namespace progressive::storage

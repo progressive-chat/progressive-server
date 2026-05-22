@@ -1,7 +1,8 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <string_view>
-#include <memory>
+
 #include "database.hpp"
 
 namespace progressive::storage {
@@ -30,4 +31,4 @@ public:
 
 std::unique_ptr<Engine> make_engine(std::string_view name);
 
-}
+}  // namespace progressive::storage

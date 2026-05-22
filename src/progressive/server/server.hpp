@@ -1,8 +1,9 @@
 #pragma once
+#include <boost/asio/io_context.hpp>
+#include <memory>
 #include <string>
 #include <string_view>
-#include <memory>
-#include <boost/asio/io_context.hpp>
+
 #include "../config/config.hpp"
 #include "../storage/database.hpp"
 
@@ -29,4 +30,4 @@ private:
   bool running_ = false;
 };
 
-}
+}  // namespace progressive::server

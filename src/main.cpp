@@ -1,11 +1,12 @@
 #include <iostream>
 #include <string_view>
 #include <vector>
-#include "progressive/server/server.hpp"
+
 #include "progressive/config/config.hpp"
+#include "progressive/crypto/signing.hpp"
+#include "progressive/server/server.hpp"
 #include "progressive/types/matrix_id.hpp"
 #include "progressive/util/random.hpp"
-#include "progressive/crypto/signing.hpp"
 
 namespace {
 
@@ -54,7 +55,7 @@ log_config: "/dev/stdout"
   return 0;
 }
 
-} // namespace
+}  // namespace
 
 int main(int argc, char* argv[]) {
   std::string config_path = "homeserver.yaml";

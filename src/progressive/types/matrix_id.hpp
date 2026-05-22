@@ -1,10 +1,10 @@
 #pragma once
-#include <string>
-#include <string_view>
-#include <optional>
-#include <stdexcept>
 #include <algorithm>
 #include <cctype>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace progressive {
 
@@ -12,16 +12,15 @@ struct InvalidMatrixId : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-template<char Sigil>
+template <char Sigil>
 class DomainSpecificString {
 public:
   static constexpr char sigil = Sigil;
 
   DomainSpecificString(std::string localpart, std::string domain)
-    : localpart_(std::move(localpart))
-    , domain_(std::move(domain))
-    , id_(sigil + localpart_ + ':' + domain_)
-  {
+      : localpart_(std::move(localpart)),
+        domain_(std::move(domain)),
+        id_(sigil + localpart_ + ':' + domain_) {
     validate();
   }
 
@@ -33,10 +32,8 @@ public:
     if (colon == std::string_view::npos) {
       throw InvalidMatrixId("missing ':' in Matrix ID");
     }
-    return DomainSpecificString(
-      std::string(s.substr(1, colon - 1)),
-      std::string(s.substr(colon + 1))
-    );
+    return DomainSpecificString(std::string(s.substr(1, colon - 1)),
+                                std::string(s.substr(colon + 1)));
   }
 
   const std::string& localpart() const { return localpart_; }
@@ -55,8 +52,10 @@ public:
 
 private:
   void validate() {
-    if (localpart_.empty()) throw InvalidMatrixId("empty localpart");
-    if (domain_.empty()) throw InvalidMatrixId("empty domain");
+    if (localpart_.empty())
+      throw InvalidMatrixId("empty localpart");
+    if (domain_.empty())
+      throw InvalidMatrixId("empty domain");
     for (char c : localpart_) {
       if (c == '\x00' || static_cast<unsigned char>(c) > 0x7F)
         throw InvalidMatrixId("invalid byte in localpart");
@@ -68,9 +67,9 @@ private:
   std::string id_;
 };
 
-using UserID    = DomainSpecificString<'@'>;
-using RoomID    = DomainSpecificString<'!'>;
+using UserID = DomainSpecificString<'@'>;
+using RoomID = DomainSpecificString<'!'>;
 using RoomAlias = DomainSpecificString<'#'>;
-using EventID   = DomainSpecificString<'$'>;
+using EventID = DomainSpecificString<'$'>;
 
-}
+}  // namespace progressive

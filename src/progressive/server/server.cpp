@@ -1,4 +1,5 @@
 #include "server.hpp"
+
 #include <boost/asio/signal_set.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -12,10 +13,7 @@ using tcp = net::ip::tcp;
 
 namespace progressive::server {
 
-Server::Server(config::Config cfg)
-  : config_(std::move(cfg))
-{
-}
+Server::Server(config::Config cfg) : config_(std::move(cfg)) {}
 
 Server::~Server() {
   stop();
@@ -132,13 +130,14 @@ void Server::start() {
   running_ = true;
   std::cout << "[progressive] server '" << config_.server.server_name << "' started\n";
   for (auto& listener : config_.server.listeners) {
-    std::cout << "[progressive] listening on " << listener.bind_address
-              << ":" << listener.port << " (" << listener.type << ")\n";
+    std::cout << "[progressive] listening on " << listener.bind_address << ":" << listener.port
+              << " (" << listener.type << ")\n";
   }
 }
 
 void Server::stop() {
-  if (!running_) return;
+  if (!running_)
+    return;
   running_ = false;
   ioc_.stop();
   std::cout << "[progressive] server stopped\n";
@@ -149,11 +148,9 @@ void Server::run() {
   start();
 
   net::signal_set signals(ioc_, SIGINT, SIGTERM);
-  signals.async_wait([this](boost::system::error_code, int) {
-    stop();
-  });
+  signals.async_wait([this](boost::system::error_code, int) { stop(); });
 
   ioc_.run();
 }
 
-}
+}  // namespace progressive::server

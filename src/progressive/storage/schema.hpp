@@ -12,4 +12,4 @@ struct SchemaVersion {
 
 std::vector<SchemaVersion> load_schema_versions(std::string_view schema_dir);
 
-}
+}  // namespace progressive::storage

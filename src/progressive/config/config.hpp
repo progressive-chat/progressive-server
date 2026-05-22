@@ -1,19 +1,19 @@
 #pragma once
+#include <filesystem>
+#include <map>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <vector>
-#include <map>
-#include <optional>
-#include <filesystem>
 
 namespace progressive::config {
 
 struct ListenerConfig {
   uint16_t port = 8008;
   std::string bind_address = "127.0.0.1";
-  std::string type = "http"; // http, https, unix
+  std::string type = "http";  // http, https, unix
   bool tls = false;
-  std::string resource; // client, federation
+  std::string resource;  // client, federation
 };
 
 struct ServerConfigSection {
@@ -39,4 +39,4 @@ struct Config {
   void validate() const;
 };
 
-}
+}  // namespace progressive::config

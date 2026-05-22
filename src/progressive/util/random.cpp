@@ -1,6 +1,7 @@
 #include "random.hpp"
-#include <random>
+
 #include <array>
+#include <random>
 
 namespace progressive::util {
 
@@ -10,7 +11,8 @@ std::string random_token(size_t length) {
   constexpr char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   std::uniform_int_distribution<size_t> dist(0, sizeof(chars) - 2);
   std::string out(length, '\0');
-  for (size_t i = 0; i < length; i++) out[i] = chars[dist(rng)];
+  for (size_t i = 0; i < length; i++)
+    out[i] = chars[dist(rng)];
   return out;
 }
 
@@ -22,4 +24,4 @@ uint64_t random_uint64() {
   return rng();
 }
 
-}
+}  // namespace progressive::util

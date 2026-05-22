@@ -1,4 +1,5 @@
 #include "key.hpp"
+
 #include <fstream>
 #include <nlohmann/json.hpp>
 
@@ -6,7 +7,8 @@ namespace progressive::crypto {
 
 ServerKey load_key(std::string_view path) {
   std::ifstream f{std::string(path)};
-  if (!f) throw std::runtime_error("cannot open key file");
+  if (!f)
+    throw std::runtime_error("cannot open key file");
   auto j = nlohmann::json::parse(f);
   ServerKey k;
   k.server_name = j.value("server_name", "");
@@ -14,4 +16,4 @@ ServerKey load_key(std::string_view path) {
   return k;
 }
 
-}
+}  // namespace progressive::crypto

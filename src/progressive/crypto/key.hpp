@@ -1,8 +1,8 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <cstdint>
 
 namespace progressive::crypto {
 
@@ -16,4 +16,4 @@ struct ServerKey {
 
 ServerKey load_key(std::string_view path);
 
-}
+}  // namespace progressive::crypto

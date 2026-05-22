@@ -1,14 +1,14 @@
 #pragma once
+#include <cstdint>
 #include <map>
 #include <string>
 #include <tuple>
-#include <cstdint>
 
 namespace progressive {
 
 using StateKey = std::tuple<std::string, std::string>;
 
-template<typename T>
+template <typename T>
 using StateMap = std::map<StateKey, T>;
 
 struct StateFilter {
@@ -28,4 +28,4 @@ struct StreamToken {
   std::string to_string() const;
 };
 
-}
+}  // namespace progressive

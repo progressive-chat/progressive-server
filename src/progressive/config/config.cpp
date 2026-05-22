@@ -1,4 +1,5 @@
 #include "config.hpp"
+
 #include <fstream>
 #include <stdexcept>
 
@@ -6,7 +7,8 @@ namespace progressive::config {
 
 Config Config::load(std::string_view path) {
   std::ifstream f{std::string(path)};
-  if (!f) throw std::runtime_error("cannot open config file: " + std::string(path));
+  if (!f)
+    throw std::runtime_error("cannot open config file: " + std::string(path));
 
   nlohmann::json j = nlohmann::json::parse(f);
   Config cfg;
@@ -52,4 +54,4 @@ void Config::validate() const {
     throw std::runtime_error("at least one listener is required");
 }
 
-}
+}  // namespace progressive::config

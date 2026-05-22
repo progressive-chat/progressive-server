@@ -1,11 +1,12 @@
 #include <gtest/gtest.h>
-#include <unordered_set>
+
+#include <progressive/events/event.hpp>
+#include <progressive/json/canonical.hpp>
 #include <progressive/types/matrix_id.hpp>
 #include <progressive/types/requester.hpp>
 #include <progressive/types/state_map.hpp>
-#include <progressive/json/canonical.hpp>
-#include <progressive/events/event.hpp>
 #include <progressive/util/random.hpp>
+#include <unordered_set>
 
 using namespace progressive;
 using namespace progressive::events;
@@ -75,10 +76,7 @@ TEST(CanonicalJSON, SimpleObject) {
 }
 
 TEST(CanonicalJSON, NestedObject) {
-  auto j = nlohmann::json::object({
-    {"type", "m.room.message"},
-    {"content", {{"body", "hello"}}}
-  });
+  auto j = nlohmann::json::object({{"type", "m.room.message"}, {"content", {{"body", "hello"}}}});
   std::string canon = json::canonical_json(j);
   EXPECT_TRUE(canon.find("\"content\"") != std::string::npos);
   EXPECT_TRUE(canon.find("\"type\"") != std::string::npos);
@@ -164,7 +162,8 @@ TEST(Random, UInt64) {
   auto x = util::random_uint64();
   auto y = util::random_uint64();
   // Very unlikely to collide
-  (void)x; (void)y;
+  (void)x;
+  (void)y;
 }
 
 TEST(StreamToken, RoundTrip) {

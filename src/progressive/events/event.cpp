@@ -1,12 +1,15 @@
 #include "event.hpp"
+
 #include "../util/time.hpp"
 
 namespace progressive::events {
 
 nlohmann::json UnsignedData::to_json() const {
   nlohmann::json j = nlohmann::json::object();
-  if (age_ts) j["age_ts"] = age_ts;
-  if (redacted_because) j["redacted_because"] = *redacted_because;
+  if (age_ts)
+    j["age_ts"] = age_ts;
+  if (redacted_because)
+    j["redacted_because"] = *redacted_because;
   return j;
 }
 
@@ -22,7 +25,8 @@ nlohmann::json Signatures::to_json() const {
   nlohmann::json j;
   for (auto& [origin, keys] : sigs) {
     nlohmann::json kv;
-    for (auto& [kid, sig] : keys) kv[kid] = sig;
+    for (auto& [kid, sig] : keys)
+      kv[kid] = sig;
     j[origin] = kv;
   }
   return j;
@@ -55,7 +59,8 @@ nlohmann::json Event::to_json() const {
   j["origin_server_ts"] = origin_server_ts;
   j["unsigned"] = unsigned_.to_json();
   j["signatures"] = signatures.to_json();
-  if (state_key) j["state_key"] = *state_key;
+  if (state_key)
+    j["state_key"] = *state_key;
   return j;
 }
 
@@ -72,10 +77,13 @@ Event Event::from_json(const nlohmann::json& j) {
   for (auto& ae : j.value("auth_events", nlohmann::json::array()))
     ev.auth_events.push_back(ae.get<std::string>());
   ev.origin_server_ts = j.value("origin_server_ts", std::string{});
-  if (j.contains("state_key")) ev.state_key = j["state_key"].get<std::string>();
-  if (j.contains("unsigned")) ev.unsigned_ = UnsignedData::from_json(j["unsigned"]);
-  if (j.contains("signatures")) ev.signatures = Signatures::from_json(j["signatures"]);
+  if (j.contains("state_key"))
+    ev.state_key = j["state_key"].get<std::string>();
+  if (j.contains("unsigned"))
+    ev.unsigned_ = UnsignedData::from_json(j["unsigned"]);
+  if (j.contains("signatures"))
+    ev.signatures = Signatures::from_json(j["signatures"]);
   return ev;
 }
 
-}
+}  // namespace progressive::events

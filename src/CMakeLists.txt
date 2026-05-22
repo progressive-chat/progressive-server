@@ -28,6 +28,10 @@ add_library(progressive STATIC
   progressive/state/room_version.cpp
   progressive/state/event_auth.cpp
   progressive/state/state_resolution.cpp
+  progressive/push/types.cpp
+  progressive/push/utils.cpp
+  progressive/push/evaluator.cpp
+  progressive/push/base_rules.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

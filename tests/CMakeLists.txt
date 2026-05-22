@@ -3,6 +3,7 @@ include(GoogleTest)
 set(TEST_SOURCES
   test_types.cpp
   test_state.cpp
+  test_push.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

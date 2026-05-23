@@ -545,6 +545,15 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
               std::to_string(now) + ")");
 
+          // FTS5 indexing
+          if (body.contains("body") && body["body"].is_string())
+            db_->execute(
+                "INSERT OR REPLACE INTO event_search (event_id,room_id,sender,body,content) VALUES "
+                "('" +
+                sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+                sql_esc(r.user_id) + "','" + sql_esc(body["body"].get<std::string>()) + "','" +
+                sql_esc(ev.content.dump()) + "')");
+
           // Track txn_id for dedup
           db_->execute(
               "INSERT OR IGNORE INTO event_txn_id (event_id,room_id,user_id,txn_id,ts) VALUES ('" +
@@ -1557,13 +1566,28 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
 
   router.add_route(
       bhttp::verb::put, "/_matrix/client/v3/room_keys/keys",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        int count = 0;
+        if (body.contains("rooms") && body["rooms"].is_object()) {
+          for (auto& [rid, sessions] : body["rooms"].items()) {
+            if (!sessions.is_object())
+              continue;
+            for (auto& [sid, sdata] : sessions.items())
+              db_->execute(
+                  "INSERT OR REPLACE INTO e2e_room_keys "
+                  "(user_id,room_id,session_id,session_data) VALUES ('" +
+                  sql_esc(r.user_id) + "','" + sql_esc(rid) + "','" + sql_esc(sid) + "','" +
+                  sql_esc(sdata.dump()) + "')");
+            count++;
+          }
+        }
         nlohmann::json resp;
-        resp["count"] = 0;
-        resp["etag"] = "0";
+        resp["count"] = count;
+        resp["etag"] = "1";
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);

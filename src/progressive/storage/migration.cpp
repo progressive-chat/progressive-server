@@ -268,10 +268,29 @@ void apply_schema(DatabasePool& db) {
           PRIMARY KEY (room_id, gap_start)
       );
       CREATE TABLE IF NOT EXISTS user_filters (
-          user_id TEXT NOT NULL,
-          filter_id INTEGER NOT NULL,
-          filter_json TEXT NOT NULL,
-          PRIMARY KEY (user_id, filter_id)
+          user_id TEXT NOT NULL, filter_id INTEGER NOT NULL,
+          filter_json TEXT NOT NULL, PRIMARY KEY (user_id, filter_id)
+      );
+      CREATE TABLE IF NOT EXISTS e2e_room_keys (
+          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          session_id TEXT NOT NULL, first_message_index INTEGER,
+          forwarded_count INTEGER, is_verified INTEGER,
+          session_data TEXT NOT NULL,
+          PRIMARY KEY (user_id, room_id, session_id)
+      );
+      CREATE TABLE IF NOT EXISTS e2e_room_keys_versions (
+          user_id TEXT NOT NULL, version TEXT NOT NULL,
+          algorithm TEXT, auth_data TEXT NOT NULL,
+          etag TEXT, PRIMARY KEY (user_id, version)
+      );
+      CREATE TABLE IF NOT EXISTS event_search (
+          event_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
+          sender TEXT, body TEXT, content TEXT
+      );
+      CREATE TABLE IF NOT EXISTS thread_subscriptions (
+          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL, subscribed INTEGER DEFAULT 1,
+          PRIMARY KEY (user_id, room_id, thread_id)
       );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");

@@ -637,6 +637,213 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_notifications");
 
+  // e2ee keys upload
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/keys/upload",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        nlohmann::json resp;
+        resp["one_time_key_counts"] = nlohmann::json::object();
+        resp["one_time_key_counts"]["signed_curve25519"] = 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "keys_upload");
+
+  // e2ee keys query
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/keys/query",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["device_keys"] = nlohmann::json::object();
+        resp["failures"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "keys_query");
+
+  // e2ee keys claim
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/keys/claim",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["one_time_keys"] = nlohmann::json::object();
+        resp["failures"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "keys_claim");
+
+  // e2ee keys changes
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/keys/changes",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["changed"] = nlohmann::json::array();
+        resp["left"] = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "keys_changes");
+
+  // room invite
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/invite",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        if (uid.empty())
+          return error_response(bhttp::status::bad_request, "M_BAD_JSON", "Missing user_id");
+        db_->execute(
+            "INSERT OR REPLACE INTO room_memberships "
+            "(event_id,room_id,user_id,membership,sender) VALUES ('$" +
+            util::random_token(43) + ":" + sn + "','" + sql_esc(p["roomId"]) + "','" +
+            sql_esc(uid) + "','invite','" + sql_esc(r.user_id) + "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_invite");
+
+  // room ban
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/ban",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        if (uid.empty())
+          return error_response(bhttp::status::bad_request, "M_BAD_JSON", "Missing user_id");
+        db_->execute("UPDATE room_memberships SET membership='ban' WHERE room_id='" +
+                     sql_esc(p["roomId"]) + "' AND user_id='" + sql_esc(uid) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_ban");
+
+  // room forget
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/forget",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM room_memberships WHERE room_id='" + sql_esc(p["roomId"]) +
+                     "' AND user_id='" + sql_esc(r.user_id) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_forget");
+
+  // room tags
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["tags"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_tags");
+
+  // account data
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/user/{userId}/account_data/{type}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_account_data");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/user/{userId}/rooms/{roomId}/account_data/{type}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_room_account_data");
+
+  // search
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/search",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["search_categories"] = nlohmann::json::object();
+        resp["search_categories"]["room_events"] = nlohmann::json::object();
+        resp["search_categories"]["room_events"]["results"] = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_search");
+
+  // capabilities
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/capabilities",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["capabilities"] = nlohmann::json::object();
+        resp["capabilities"]["m.room_versions"] = nlohmann::json::object();
+        resp["capabilities"]["m.room_versions"]["default"] = "10";
+        resp["capabilities"]["m.room_versions"]["available"] = {
+            {"1"}, {"2"}, {"3"}, {"4"}, {"5"}, {"6"}, {"7"}, {"8"}, {"9"}, {"10"}, {"11"}};
+        resp["capabilities"]["m.change_password"] = {{"enabled", false}};
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_capabilities");
+
   // media upload — now handled by media module
 
   // presence

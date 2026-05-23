@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "../../auth/event_auth.hpp"
 #include "../../events/event_factory.hpp"
 #include "../../types/matrix_id.hpp"
 #include "../../util/random.hpp"
@@ -422,6 +423,43 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return res;
       },
       "client_directory_put");
+
+  // send message
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        try {
+          auth::EventAuthorizer authz(*db_);
+          auto check = authz.can_send_event(p["roomId"], r.user_id, p["eventType"], false);
+          if (!check.allowed)
+            return error_response(bhttp::status::forbidden, check.errcode, check.error);
+          auto body = nlohmann::json::parse(req.body());
+          auto rid = RoomID::from_string(p["roomId"]);
+          auto ev = events::create_local_event(rid, p["eventType"], r.user_id, body);
+          ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+          uint64_t now = util::now_ms();
+          db_->execute(
+              "INSERT INTO events "
+              "(event_id,room_id,type,sender,content,state_key,depth,origin_server_ts,stream_"
+              "ordering) VALUES ('" +
+              sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+              sql_esc(p["eventType"]) + "','" + sql_esc(r.user_id) + "','" +
+              sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
+              std::to_string(now) + ")");
+          nlohmann::json resp;
+          resp["event_id"] = ev.event_id.to_string();
+          Res res{bhttp::status::ok, HTTP11};
+          set_json(res, resp.dump());
+          set_cors(res);
+          return res;
+        } catch (const std::exception& e) {
+          return error_response(bhttp::status::internal_server_error, "M_UNKNOWN", e.what());
+        }
+      },
+      "client_send");
 
   // room state
   router.add_route(

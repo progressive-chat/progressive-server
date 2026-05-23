@@ -531,12 +531,50 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
               std::to_string(now) + ")");
 
-          // Evaluate push rules for notification
+          // Forward extremities: remove prevs, add new event
+          db_->execute("DELETE FROM event_forward_extremities WHERE room_id='" +
+                       sql_esc(p["roomId"]) + "'");
+          db_->execute("INSERT INTO event_forward_extremities (event_id,room_id) VALUES ('" +
+                       sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "')");
+
+          // Store relations
+          if (body.contains("m.relates_to") && body["m.relates_to"].is_object()) {
+            auto& rel = body["m.relates_to"];
+            std::string rel_to = rel.value("event_id", std::string{});
+            std::string rel_type = rel.value("rel_type", std::string{});
+            std::string agg_key = rel.value("key", std::string{});
+            if (!rel_to.empty() && !rel_type.empty())
+              db_->execute(
+                  "INSERT OR REPLACE INTO event_relations "
+                  "(event_id,relates_to_id,relation_type,aggregation_key) VALUES ('" +
+                  sql_esc(ev.event_id.to_string()) + "','" + sql_esc(rel_to) + "','" +
+                  sql_esc(rel_type) + "','" + sql_esc(agg_key) + "')");
+          }
+
+          // Evaluate push rules and store notification actions
           push::PushRuleEvaluator evaluator(ev.content);
           auto& rules = push::all_base_rules();
-          auto actions = evaluator.run(rules, "@all:localhost", std::nullopt);
-          if (!actions.empty())
-            std::cout << "[push] notification for event " << ev.event_id.to_string() << "\n";
+          auto actions = evaluator.run(rules, r.user_id, std::nullopt);
+          if (!actions.empty()) {
+            auto acts_json = push::actions_to_json(actions);
+            db_->execute(
+                "INSERT OR REPLACE INTO event_push_actions "
+                "(event_id,user_id,room_id,actions,stream_ordering) VALUES ('" +
+                sql_esc(ev.event_id.to_string()) + "','" + sql_esc(r.user_id) + "','" +
+                sql_esc(p["roomId"]) + "','" + sql_esc(acts_json.dump()) + "'," +
+                std::to_string(now) + ")");
+
+            // Update room notification counts
+            bool has_highlight = acts_json.dump().find("highlight") != std::string::npos;
+            db_->execute(
+                "INSERT INTO event_push_summary (user_id,room_id,notif_count,highlight_count,"
+                "stream_ordering) VALUES ('" +
+                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "',1," +
+                (has_highlight ? "1" : "0") + "," + std::to_string(now) +
+                ") ON CONFLICT(user_id,room_id) DO UPDATE SET "
+                "notif_count=notif_count+1,highlight_count=highlight_count+" +
+                (has_highlight ? "1" : "0") + ",stream_ordering=" + std::to_string(now));
+          }
 
           nlohmann::json resp;
           resp["event_id"] = ev.event_id.to_string();

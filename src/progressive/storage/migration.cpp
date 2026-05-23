@@ -190,6 +190,59 @@ void apply_schema(DatabasePool& db) {
           content TEXT, stream_id BIGINT
       );
       CREATE INDEX IF NOT EXISTS device_inbox_user ON device_inbox(user_id);
+      CREATE TABLE IF NOT EXISTS event_relations (
+          event_id TEXT NOT NULL,
+          relates_to_id TEXT NOT NULL,
+          relation_type TEXT NOT NULL,
+          aggregation_key TEXT,
+          PRIMARY KEY (event_id)
+      );
+      CREATE INDEX IF NOT EXISTS event_relations_relates ON event_relations(relates_to_id);
+      CREATE INDEX IF NOT EXISTS event_relations_type ON event_relations(relation_type);
+      CREATE TABLE IF NOT EXISTS state_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          room_id TEXT NOT NULL,
+          event_id TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS state_groups_state (
+          state_group INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          state_key TEXT NOT NULL,
+          event_id TEXT NOT NULL,
+          PRIMARY KEY (state_group, type, state_key)
+      );
+      CREATE TABLE IF NOT EXISTS event_forward_extremities (
+          event_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          PRIMARY KEY (event_id, room_id)
+      );
+      CREATE TABLE IF NOT EXISTS event_to_state_groups (
+          event_id TEXT PRIMARY KEY, state_group INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS event_push_actions (
+          event_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          profile_tag TEXT,
+          actions TEXT NOT NULL,
+          stream_ordering INTEGER,
+          PRIMARY KEY (event_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS event_push_summary (
+          user_id TEXT NOT NULL,
+          room_id TEXT NOT NULL,
+          notif_count INTEGER DEFAULT 0,
+          highlight_count INTEGER DEFAULT 0,
+          stream_ordering INTEGER,
+          PRIMARY KEY (user_id, room_id)
+      );
+      CREATE TABLE IF NOT EXISTS ui_auth_sessions (
+          session_id TEXT PRIMARY KEY,
+          user_id TEXT,
+          client_secret TEXT,
+          server_data TEXT,
+          creation_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

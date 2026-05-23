@@ -402,12 +402,151 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           }
           resp["rooms"]["join"][rid] = rd;
         }
+
+        // Additional sync fields
+        // To-device messages
+        auto tdev = db_->query("SELECT type,sender,content FROM device_inbox WHERE user_id='" +
+                               sql_esc(r.user_id) +
+                               "' AND device_id!='otk' ORDER BY stream_id DESC LIMIT 10");
+        nlohmann::json to_device;
+        to_device["events"] = nlohmann::json::array();
+        for (auto& td : tdev) {
+          nlohmann::json ev;
+          ev["type"] = td["type"];
+          ev["sender"] = td["sender"];
+          try {
+            ev["content"] = nlohmann::json::parse(td["content"].template get<std::string>());
+          } catch (...) {
+            ev["content"] = nlohmann::json::object();
+          }
+          to_device["events"].push_back(ev);
+        }
+        resp["to_device"] = to_device;
+
+        // Presence
+        nlohmann::json presence;
+        presence["events"] = nlohmann::json::array();
+        resp["presence"] = presence;
+
+        // Device lists (stub)
+        resp["device_lists"] = nlohmann::json::object();
+        resp["device_lists"]["changed"] = nlohmann::json::array();
+        resp["device_lists"]["left"] = nlohmann::json::array();
+
+        // Unread notifications from event_push_summary
+        auto unreads = db_->query(
+            "SELECT room_id,notif_count,highlight_count FROM event_push_summary "
+            "WHERE user_id='" +
+            sql_esc(r.user_id) + "'");
+        nlohmann::json unread;
+        for (auto& u : unreads) {
+          nlohmann::json room_notif;
+          room_notif["notification_count"] = u.value("notif_count", 0);
+          room_notif["highlight_count"] = u.value("highlight_count", 0);
+          unread[u["room_id"].template get<std::string>()] = room_notif;
+        }
+        resp["rooms"]["unread_notifications"] = unread;
+
+        // Account data (stub)
+        nlohmann::json acct_data;
+        acct_data["events"] = nlohmann::json::array();
+        resp["account_data"] = acct_data;
+
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);
         return res;
       },
       "client_sync");
+
+  // single event
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/event/{eventId}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM events WHERE event_id='" + sql_esc(p["eventId"]) +
+                               "' AND room_id='" + sql_esc(p["roomId"]) + "'");
+        if (rows.empty() || rows[0]["event_id"].is_null())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Event not found");
+        auto& ev = rows[0];
+        nlohmann::json resp;
+        resp["event_id"] = ev["event_id"];
+        resp["type"] = ev["type"];
+        resp["sender"] = ev["sender"];
+        resp["room_id"] = ev["room_id"];
+        try {
+          resp["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+        } catch (...) {
+          resp["content"] = nlohmann::json::object();
+        }
+        resp["origin_server_ts"] = ev.value("origin_server_ts", "");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_event");
+
+  // full room state
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/state",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                               "' AND state_key != ''");
+        nlohmann::json resp = nlohmann::json::array();
+        for (auto& ev : rows) {
+          nlohmann::json se;
+          se["event_id"] = ev["event_id"];
+          se["type"] = ev["type"];
+          se["sender"] = ev["sender"];
+          se["state_key"] = ev["state_key"];
+          try {
+            se["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            se["content"] = nlohmann::json::object();
+          }
+          resp.push_back(se);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_state_all");
+
+  // joined members with display names
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/joined_members",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT user_id FROM room_memberships WHERE room_id='" +
+                               sql_esc(p["roomId"]) + "' AND membership='join'");
+        nlohmann::json resp;
+        resp["joined"] = nlohmann::json::object();
+        for (auto& r : rows)
+          resp["joined"][r["user_id"].template get<std::string>()] =
+              nlohmann::json::object({{"display_name", r["user_id"]}});
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_joined_members");
+
+  // room aliases
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/aliases",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT alias FROM room_aliases WHERE room_id='" +
+                               sql_esc(p["roomId"]) + "'");
+        nlohmann::json resp;
+        resp["aliases"] = nlohmann::json::array();
+        for (auto& r : rows)
+          resp["aliases"].push_back(r["alias"]);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_aliases");
 
   // room redact
   router.add_route(
@@ -891,16 +1030,32 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_delete_device");
 
-  // notifications
+  // notifications — real data from event_push_actions
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/notifications",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query(
+            "SELECT event_id,room_id,actions,stream_ordering FROM event_push_actions "
+            "WHERE user_id='" +
+            sql_esc(r.user_id) + "' ORDER BY stream_ordering DESC LIMIT 20");
         nlohmann::json resp;
         resp["notifications"] = nlohmann::json::array();
         resp["next_token"] = "0";
+        for (auto& n : rows) {
+          nlohmann::json notif;
+          notif["event"]["event_id"] = n["event_id"];
+          notif["room_id"] = n["room_id"];
+          notif["read"] = false;
+          try {
+            notif["actions"] = nlohmann::json::parse(n["actions"].template get<std::string>());
+          } catch (...) {
+            notif["actions"] = nlohmann::json::array({"notify"});
+          }
+          resp["notifications"].push_back(notif);
+        }
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);

@@ -385,6 +385,14 @@ void apply_schema(DatabasePool& db) {
       CREATE TABLE IF NOT EXISTS received_transactions (
           transaction_id TEXT PRIMARY KEY, origin TEXT, received_ts BIGINT
       );
+      CREATE TABLE IF NOT EXISTS sliding_sync_connections (
+          connection_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+          device_id TEXT, pos TEXT, created_ts BIGINT, updated_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms (
+          connection_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          PRIMARY KEY (connection_id, room_id)
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

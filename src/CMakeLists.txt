@@ -35,6 +35,7 @@ add_library(progressive STATIC
   progressive/state/event_auth.cpp
   progressive/state/state_resolution.cpp
   progressive/state/state_group.cpp
+  progressive/bg/runner.cpp
   progressive/push/types.cpp
   progressive/push/utils.cpp
   progressive/push/evaluator.cpp

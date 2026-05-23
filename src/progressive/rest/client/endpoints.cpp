@@ -2646,6 +2646,33 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_server_acl_get");
 
+  // sliding sync (MSC3575)
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string conn_id = body.value("conn_id", "c_" + util::random_token(16));
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT OR REPLACE INTO sliding_sync_connections "
+            "(connection_id,user_id,pos,created_ts,updated_ts) VALUES ('" +
+            sql_esc(conn_id) + "','" + sql_esc(r.user_id) + "',''," + std::to_string(now) + "," +
+            std::to_string(now) + ")");
+        nlohmann::json resp;
+        resp["conn_id"] = conn_id;
+        resp["rooms"] = nlohmann::json::object();
+        resp["extensions"] = nlohmann::json::object();
+        resp["pos"] = std::to_string(now);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "sliding_sync");
+
   // .well-known
   router.add_route(
       bhttp::verb::get, "/.well-known/matrix/client",

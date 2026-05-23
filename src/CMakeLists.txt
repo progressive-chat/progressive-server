@@ -23,6 +23,7 @@ add_library(progressive STATIC
   progressive/http/router.cpp
   progressive/auth/auth.cpp
   progressive/rest/client/endpoints.cpp
+  progressive/media/media.cpp
   progressive/federation/auth.cpp
   progressive/federation/federation_server.cpp
   progressive/federation/federation_client.cpp

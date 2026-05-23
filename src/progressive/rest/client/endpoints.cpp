@@ -387,22 +387,146 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_directory");
 
-  // media upload
+  // send message
   router.add_route(
-      bhttp::verb::post, "/_matrix/media/v3/upload",
-      [auth_](Req&& req, Params) -> Res {
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/send/{eventType}/{txnId}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        std::string mxc = "mxc://localhost/" + util::random_token(24);
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          auto rid = RoomID::from_string(p["roomId"]);
+          auto ev = events::create_local_event(rid, p["eventType"], r.user_id, body);
+          ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+          uint64_t now = util::now_ms();
+          db_->execute(
+              "INSERT INTO events "
+              "(event_id,room_id,type,sender,content,state_key,depth,"
+              "origin_server_ts,stream_ordering) VALUES ('" +
+              sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+              sql_esc(p["eventType"]) + "','" + sql_esc(r.user_id) + "','" +
+              sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
+              std::to_string(now) + ")");
+          nlohmann::json resp;
+          resp["event_id"] = ev.event_id.to_string();
+          Res res{bhttp::status::ok, HTTP11};
+          set_json(res, resp.dump());
+          set_cors(res);
+          return res;
+        } catch (const std::exception& e) {
+          return error_response(bhttp::status::internal_server_error, "M_UNKNOWN", e.what());
+        }
+      },
+      "client_send");
+
+  // room join
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/join",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rid = RoomID::from_string(p["roomId"]);
+        nlohmann::json jc;
+        jc["membership"] = "join";
+        auto ev = events::create_local_event(rid, "m.room.member", r.user_id, jc, r.user_id);
+        ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT OR REPLACE INTO room_memberships "
+            "(event_id,room_id,user_id,membership,sender) VALUES ('" +
+            sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+            sql_esc(r.user_id) + "','join','" + sql_esc(r.user_id) + "')");
+        db_->execute(
+            "INSERT INTO events "
+            "(event_id,room_id,type,sender,content,state_key,depth,"
+            "origin_server_ts,stream_ordering) VALUES ('" +
+            sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) +
+            "','m.room.member','" + sql_esc(r.user_id) + "','" + sql_esc(ev.content.dump()) +
+            "','" + sql_esc(r.user_id) + "',1,'" + sql_esc(ev.origin_server_ts) + "'," +
+            std::to_string(now) + ")");
         nlohmann::json resp;
-        resp["content_uri"] = mxc;
+        resp["room_id"] = p["roomId"];
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);
         return res;
       },
-      "media_upload");
+      "client_join");
+
+  // message pagination
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/messages",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string dir = "b";
+        auto target = std::string(req.target());
+        auto dp = target.find("dir=");
+        if (dp != std::string::npos)
+          dir = target.substr(dp + 4, 1);
+
+        auto evr = db_->query(
+            "SELECT event_id,type,sender,content,state_key,depth,"
+            "origin_server_ts FROM events WHERE room_id='" +
+            sql_esc(p["roomId"]) + "' ORDER BY depth " + (dir == "b" ? "DESC" : "ASC") +
+            " LIMIT 20");
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        resp["start"] = "t0";
+        resp["end"] = "t1";
+        for (auto& ev : evr) {
+          nlohmann::json ej;
+          ej["event_id"] = ev["event_id"];
+          ej["type"] = ev["type"];
+          ej["sender"] = ev["sender"];
+          ej["room_id"] = p["roomId"];
+          ej["origin_server_ts"] = ev.value("origin_server_ts", "");
+          try {
+            ej["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            ej["content"] = nlohmann::json::object();
+          }
+          resp["chunk"].push_back(ej);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_messages");
+
+  // typing
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/typing/{userId}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_typing");
+
+  // read receipts
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/receipt/{receiptType}/{eventId}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_receipt");
+
+  // media upload — now handled by media module
 
   // presence
   router.add_route(

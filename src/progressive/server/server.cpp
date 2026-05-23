@@ -7,6 +7,7 @@
 #include "../crypto/signing.hpp"
 #include "../federation/auth.hpp"
 #include "../federation/federation_server.hpp"
+#include "../media/media.hpp"
 #include "../rest/client/endpoints.hpp"
 #include "../rest/key/v2/server_key.hpp"
 #include "../storage/migration.hpp"
@@ -52,6 +53,10 @@ void Server::setup() {
 
   std::cout << "[progressive] signing key: " << signing_key_.key_id() << " ("
             << signing_key_.public_key_b64().substr(0, 12) << "...)\n";
+
+  // Register media routes
+  auto auth_obj = auth::Auth(*db_);
+  media::register_routes(router_, auth_obj, "/tmp/media", config_.server.server_name);
 
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {

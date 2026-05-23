@@ -873,6 +873,50 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "keys_changes");
 
+  // cross-signing keys
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/keys/device_signing/upload",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "keys_device_signing");
+
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/keys/signatures/upload",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "keys_signatures");
+
+  // room hierarchy (spaces)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/hierarchy",
+      [auth_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["rooms"] = nlohmann::json::array();
+        resp["next_batch"] = "";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_hierarchy");
+
   // room invite
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/invite",

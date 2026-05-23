@@ -38,4 +38,21 @@ bool RateLimiter::allow(std::string_view key) {
   return false;
 }
 
+bool EndpointRateLimiter::allow(std::string_view endpoint, std::string_view ip) {
+  std::lock_guard lock(mutex_);
+  std::string ep(endpoint);
+  auto it = limiters_.find(ep);
+  if (it == limiters_.end()) {
+    limiters_.try_emplace(ep, 100.0, 200.0);
+    it = limiters_.find(ep);
+  }
+  return it->second.allow(ip);
+}
+
+void EndpointRateLimiter::set_limit(std::string_view endpoint, double rate, double burst) {
+  std::lock_guard lock(mutex_);
+  limiters_.erase(std::string(endpoint));
+  limiters_.try_emplace(std::string(endpoint), rate, burst);
+}
+
 }  // namespace progressive::ratelimit

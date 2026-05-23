@@ -331,6 +331,54 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
         return r;
       },
       "fed_profile");
+
+  // backfill
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/backfill/{roomId}",
+      [&db](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["origin"] = "localhost";
+        resp["origin_server_ts"] = util::now_ms();
+        resp["pdus"] = nlohmann::json::array();
+
+        auto rows = db.query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                             "' ORDER BY depth DESC LIMIT 50");
+        for (auto& ev : rows) {
+          nlohmann::json pdu;
+          pdu["event_id"] = ev["event_id"];
+          pdu["room_id"] = ev["room_id"];
+          pdu["type"] = ev["type"];
+          pdu["sender"] = ev["sender"];
+          try {
+            pdu["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            pdu["content"] = nlohmann::json::object();
+          }
+          pdu["depth"] = ev.value("depth", int64_t(0));
+          pdu["origin"] = "localhost";
+          pdu["origin_server_ts"] = ev.value("origin_server_ts", "");
+          if (!ev["state_key"].is_null())
+            pdu["state_key"] = ev["state_key"];
+          resp["pdus"].push_back(pdu);
+        }
+        Res r{bhttp::status::ok, 11};
+        phttp::set_json(r, resp.dump());
+        return r;
+      },
+      "fed_backfill");
+
+  // query profile
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/query/profile",
+      [&db](Req&&, Params) -> Res {
+        Res r{bhttp::status::not_found, 11};
+        nlohmann::json j;
+        j["errcode"] = "M_NOT_FOUND";
+        j["error"] = "Profile not found";
+        phttp::set_json(r, j.dump());
+        return r;
+      },
+      "fed_query_profile");
 }
 
 }  // namespace progressive::federation

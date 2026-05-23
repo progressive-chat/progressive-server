@@ -1299,6 +1299,34 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_available");
 
+  // user directory search
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/user_directory/search",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string term = body.value("search_term", std::string{});
+        nlohmann::json resp;
+        resp["results"] = nlohmann::json::array();
+        resp["limited"] = false;
+        if (!term.empty()) {
+          auto rows = db_->query("SELECT id FROM users WHERE id LIKE '%" + term + "%' LIMIT 20");
+          for (auto& row : rows) {
+            nlohmann::json u;
+            u["user_id"] = row["id"];
+            u["display_name"] = row["id"];
+            resp["results"].push_back(u);
+          }
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_user_directory");
+
   // pushers
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/pushers",

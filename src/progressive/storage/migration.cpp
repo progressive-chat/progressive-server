@@ -181,10 +181,15 @@ void apply_schema(DatabasePool& db) {
           PRIMARY KEY (user_id, room_id)
       );
       CREATE TABLE IF NOT EXISTS registration_tokens (
-          token TEXT PRIMARY KEY,
-          used INTEGER DEFAULT 0,
-          created_ts BIGINT
+          token TEXT PRIMARY KEY, used INTEGER DEFAULT 0, created_ts BIGINT
       );
+      CREATE TABLE IF NOT EXISTS device_inbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL, device_id TEXT,
+          type TEXT NOT NULL, sender TEXT,
+          content TEXT, stream_id BIGINT
+      );
+      CREATE INDEX IF NOT EXISTS device_inbox_user ON device_inbox(user_id);
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

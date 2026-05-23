@@ -1210,7 +1210,68 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_turn");
 
-  // Prometheus metrics (basic stubs)
+  // to-device messaging
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/sendToDevice/{eventType}/{txnId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        uint64_t now = util::now_ms();
+        if (body.contains("messages") && body["messages"].is_object()) {
+          for (auto& [uid, devs] : body["messages"].items()) {
+            for (auto& [did, payload] : devs.items()) {
+              db_->execute(
+                  "INSERT INTO device_inbox (user_id,device_id,type,sender,"
+                  "content,stream_id) VALUES ('" +
+                  sql_esc(uid) + "','" + sql_esc(did) + "','" + sql_esc(p["eventType"]) + "','" +
+                  sql_esc(r.user_id) + "','" + sql_esc(payload.dump()) + "'," +
+                  std::to_string(now) + ")");
+            }
+          }
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_sendtodevice");
+
+  // server notices (admin send notice)
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/server_notices",
+      [db_, sn](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        std::string msg =
+            body.value("content", nlohmann::json::object()).value("body", std::string{});
+        if (uid.empty()) {
+          Res r{bhttp::status::bad_request, HTTP11};
+          set_json(r, R"({"errcode":"M_BAD_JSON","error":"Missing user_id"})");
+          return r;
+        }
+        auto rid = RoomID::from_string("!server_notices:" + sn);
+        auto ev = events::create_local_event(rid, "m.room.message", "@server:" + sn,
+                                             {{"msgtype", "m.text"}, {"body", msg}});
+        ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT INTO events (event_id,room_id,type,sender,content,state_key,depth,"
+            "origin_server_ts,stream_ordering) VALUES ('" +
+            sql_esc(ev.event_id.to_string()) + "','" + sql_esc(rid.to_string()) +
+            "','m.room.message','@server:" + sn + "','" + sql_esc(ev.content.dump()) + "','',1,'" +
+            sql_esc(ev.origin_server_ts) + "'," + std::to_string(now) + ")");
+        nlohmann::json resp;
+        resp["event_id"] = ev.event_id.to_string();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "server_notices");
+
+  // Prometheus metrics
   router.add_route(
       bhttp::verb::get, "/_synapse/metrics",
       [](Req&&, Params) -> Res {

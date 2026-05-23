@@ -367,6 +367,50 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
       },
       "fed_backfill");
 
+  // event auth
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/event_auth/{roomId}/{eventId}",
+      [&db](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["auth_chain"] = nlohmann::json::array();
+        auto rows = db.query("SELECT event_id FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                             "' LIMIT 10");
+        for (auto& r : rows)
+          resp["auth_chain"].push_back(r["event_id"]);
+        Res res{bhttp::status::ok, 11};
+        phttp::set_json(res, resp.dump());
+        return res;
+      },
+      "fed_event_auth");
+
+  // get missing events
+  router.add_route(
+      bhttp::verb::post, "/_matrix/federation/v1/get_missing_events/{roomId}",
+      [&db](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["events"] = nlohmann::json::array();
+        auto rows = db.query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                             "' ORDER BY depth DESC LIMIT 20");
+        for (auto& ev : rows) {
+          nlohmann::json pdu;
+          pdu["event_id"] = ev["event_id"];
+          pdu["room_id"] = ev["room_id"];
+          pdu["type"] = ev["type"];
+          pdu["sender"] = ev["sender"];
+          try {
+            pdu["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            pdu["content"] = nlohmann::json::object();
+          }
+          pdu["depth"] = ev.value("depth", int64_t(0));
+          resp["events"].push_back(pdu);
+        }
+        Res res{bhttp::status::ok, 11};
+        phttp::set_json(res, resp.dump());
+        return res;
+      },
+      "fed_missing_events");
+
   // query profile
   router.add_route(
       bhttp::verb::get, "/_matrix/federation/v1/query/profile",

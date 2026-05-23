@@ -476,6 +476,68 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
         return r;
       },
       "fed_query_profile");
+
+  // state_ids
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/state_ids/{roomId}",
+      [&db](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["pdu_ids"] = nlohmann::json::array();
+        resp["auth_chain_ids"] = nlohmann::json::array();
+        auto rows = db.query("SELECT event_id FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                             "' LIMIT 50");
+        for (auto& r : rows)
+          resp["pdu_ids"].push_back(r["event_id"]);
+        Res res{bhttp::status::ok, 11};
+        phttp::set_json(res, resp.dump());
+        return res;
+      },
+      "fed_state_ids");
+
+  // invite
+  router.add_route(
+      bhttp::verb::put, "/_matrix/federation/v2/invite/{roomId}/{eventId}",
+      [&db](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        if (body.contains("event")) {
+          auto& evt = body["event"];
+          db.execute(
+              "INSERT OR REPLACE INTO events (event_id,room_id,type,sender,content,state_key,depth,"
+              "origin_server_ts,stream_ordering) VALUES ('" +
+              sql_esc(evt.value("event_id", p["eventId"])) + "','" +
+              sql_esc(evt.value("room_id", p["roomId"])) + "','" +
+              sql_esc(evt.value("type", std::string{"m.room.member"})) + "','" +
+              sql_esc(evt.value("sender", std::string{})) + "','" + sql_esc(evt["content"].dump()) +
+              "','" + sql_esc(evt.value("state_key", std::string{})) + "'," +
+              std::to_string(evt.value("depth", int64_t(1))) + ",'" +
+              sql_esc(evt.value("origin_server_ts", std::string{})) + "'," +
+              std::to_string(util::now_ms()) + ")");
+          db.execute(
+              "INSERT OR REPLACE INTO room_memberships "
+              "(event_id,room_id,user_id,membership,sender) "
+              "VALUES ('" +
+              sql_esc(evt.value("event_id", p["eventId"])) + "','" +
+              sql_esc(evt.value("room_id", p["roomId"])) + "','" +
+              sql_esc(evt.value("state_key", std::string{})) + "','invite','" +
+              sql_esc(evt.value("sender", std::string{})) + "')");
+        }
+        nlohmann::json resp;
+        resp["event"] = body.value("event", nlohmann::json::object());
+        Res r{bhttp::status::ok, 11};
+        phttp::set_json(r, resp.dump());
+        return r;
+      },
+      "fed_invite");
+
+  // federation media download
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/media/download/{mediaId}",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::not_found, 11};
+        phttp::set_json(r, R"({"errcode":"M_NOT_FOUND","error":"Media not found"})");
+        return r;
+      },
+      "fed_media_download");
 }
 
 }  // namespace progressive::federation

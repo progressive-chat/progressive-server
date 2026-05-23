@@ -2045,6 +2045,88 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "admin_bg_updates");
 
+  // admin: media management
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/room/{roomId}/media",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["local"] = nlohmann::json::array();
+        resp["remote"] = nlohmann::json::array();
+        resp["total"] = 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_media_room");
+
+  // admin: event reports
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/event_reports",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT * FROM event_reports ORDER BY received_ts DESC LIMIT 50");
+        nlohmann::json resp;
+        resp["event_reports"] = nlohmann::json::array();
+        resp["total"] = rows.size();
+        for (auto& r : rows) {
+          nlohmann::json rep;
+          rep["id"] = r["id"];
+          rep["room_id"] = r["room_id"];
+          rep["event_id"] = r["event_id"];
+          rep["user_id"] = r["user_id"];
+          rep["reason"] = r.value("reason", "");
+          resp["event_reports"].push_back(rep);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_event_reports");
+
+  // profile endpoints (store in profiles table)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/profile/{userId}/avatar_url",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute("INSERT OR REPLACE INTO profiles (user_id,avatar_url) VALUES ('" +
+                     sql_esc(p["userId"]) + "','" +
+                     sql_esc(body.value("avatar_url", std::string{})) + "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_avatar");
+
+  // pushers
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/pushers/set",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute(
+            "INSERT OR REPLACE INTO pushers "
+            "(user_id,app_id,pushkey,kind,app_display_name,lang,data) "
+            "VALUES ('" +
+            sql_esc(r.user_id) + "','" + sql_esc(body.value("app_id", std::string{})) + "','" +
+            sql_esc(body.value("pushkey", std::string{})) + "','" +
+            sql_esc(body.value("kind", std::string{})) + "','" +
+            sql_esc(body.value("app_display_name", std::string{})) + "','" +
+            sql_esc(body.value("lang", std::string{})) + "','" + sql_esc(body["data"].dump()) +
+            "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_pusher_set_real");
+
   // media upload — now handled by media module
 
   // presence

@@ -326,10 +326,36 @@ void apply_schema(DatabasePool& db) {
           depends_on TEXT
       );
       CREATE TABLE IF NOT EXISTS scheduled_tasks (
-          task_id TEXT PRIMARY KEY,
-          action TEXT NOT NULL,
-          status TEXT DEFAULT 'scheduled',
-          params TEXT, created_ts BIGINT
+          task_id TEXT PRIMARY KEY, action TEXT NOT NULL,
+          status TEXT DEFAULT 'scheduled', params TEXT, created_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS profiles (
+          user_id TEXT PRIMARY KEY,
+          displayname TEXT,
+          avatar_url TEXT
+      );
+      CREATE TABLE IF NOT EXISTS account_data (
+          user_id TEXT NOT NULL, data_type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          PRIMARY KEY (user_id, data_type)
+      );
+      CREATE TABLE IF NOT EXISTS room_account_data (
+          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          data_type TEXT NOT NULL, content TEXT NOT NULL,
+          PRIMARY KEY (user_id, room_id, data_type)
+      );
+      CREATE TABLE IF NOT EXISTS pushers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL, app_id TEXT NOT NULL,
+          pushkey TEXT NOT NULL, kind TEXT,
+          app_display_name TEXT, device_display_name TEXT,
+          lang TEXT, data TEXT, last_token TEXT
+      );
+      CREATE TABLE IF NOT EXISTS event_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          room_id TEXT NOT NULL, event_id TEXT NOT NULL,
+          user_id TEXT NOT NULL, score INTEGER DEFAULT 0,
+          reason TEXT, received_ts BIGINT
       );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");

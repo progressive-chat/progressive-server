@@ -110,3 +110,19 @@ CREATE TABLE IF NOT EXISTS room_aliases (
 );
 
 CREATE INDEX IF NOT EXISTS room_aliases_room ON room_aliases(room_id);
+
+CREATE TABLE IF NOT EXISTS read_markers (
+    user_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    updated_ts BIGINT,
+    PRIMARY KEY (user_id, room_id)
+);
+
+CREATE TABLE IF NOT EXISTS read_receipts (
+    user_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    updated_ts BIGINT,
+    PRIMARY KEY (user_id, room_id)
+);

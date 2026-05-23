@@ -1345,13 +1345,34 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_relations");
 
-  // read markers
+  // read markers — with persistence
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/read_markers",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params p) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          std::string fully_read = body.value("m.fully_read", std::string{});
+          std::string read_receipt = body.value("m.read", std::string{});
+          uint64_t now = util::now_ms();
+          if (!fully_read.empty()) {
+            db_->execute(
+                "INSERT OR REPLACE INTO read_markers (user_id,room_id,event_id,updated_ts) "
+                "VALUES ('" +
+                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(fully_read) +
+                "'," + std::to_string(now) + ")");
+          }
+          if (!read_receipt.empty()) {
+            db_->execute(
+                "INSERT OR REPLACE INTO read_receipts (user_id,room_id,event_id,updated_ts) "
+                "VALUES ('" +
+                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(read_receipt) +
+                "'," + std::to_string(now) + ")");
+          }
+        } catch (...) {
+        }
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, "{}");
         set_cors(res);

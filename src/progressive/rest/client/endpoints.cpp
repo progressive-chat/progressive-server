@@ -1210,6 +1210,179 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_turn");
 
+  // room key backup
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/room_keys/version",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["data"] = nlohmann::json::object();
+        resp["etag"] = "0";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "room_keys_version");
+
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/room_keys/version",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["version"] = "1";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "room_keys_version_create");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/room_keys/keys",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["count"] = 0;
+        resp["etag"] = "0";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "room_keys_put");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/room_keys/keys",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["rooms"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "room_keys_get");
+
+  // logout
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/logout",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto tok = req[bhttp::field::authorization];
+        std::string_view t(tok);
+        if (t.starts_with("Bearer "))
+          t.remove_prefix(7);
+        db_->execute("DELETE FROM access_tokens WHERE token='" + sql_esc(std::string(t)) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_logout");
+
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/logout/all",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM access_tokens WHERE user_id='" + sql_esc(r.user_id) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_logout_all");
+
+  // refresh token
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/refresh",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string new_tok = auth_->create_token(r.user_id);
+        nlohmann::json resp;
+        resp["access_token"] = new_tok;
+        resp["user_id"] = r.user_id;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_refresh");
+
+  // admin: deactivate user
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/deactivate/{userId}",
+      [db_](Req&&, Params p) -> Res {
+        db_->execute("UPDATE users SET deactivated=1 WHERE id='" + sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_deactivate");
+
+  // admin: reset password
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/reset_password/{userId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string pw = body.value("new_password", std::string{});
+        if (pw.empty()) {
+          Res res{bhttp::status::bad_request, HTTP11};
+          set_json(res, R"({"errcode":"M_BAD_JSON","error":"Missing new_password"})");
+          return res;
+        }
+        std::string hash = auth_->hash_password(pw);
+        db_->execute("UPDATE users SET password_hash='" + sql_esc(hash) + "' WHERE id='" +
+                     sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_reset_password");
+
+  // admin: search users
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v2/users",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT id,admin,deactivated FROM users");
+        nlohmann::json resp;
+        resp["users"] = nlohmann::json::array();
+        resp["total"] = resp["users"].size();
+        for (auto& r : rows) {
+          nlohmann::json u;
+          u["name"] = r["id"];
+          u["admin"] = r.value("admin", 0);
+          u["deactivated"] = r.value("deactivated", 0);
+          resp["users"].push_back(u);
+        }
+        resp["total"] = resp["users"].size();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_users");
+
   // to-device messaging
   router.add_route(
       bhttp::verb::put, "/_matrix/client/v3/sendToDevice/{eventType}/{txnId}",

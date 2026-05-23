@@ -411,6 +411,38 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
       },
       "fed_missing_events");
 
+  // make leave
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/make_leave/{roomId}/{userId}",
+      [](Req&&, Params p) -> Res {
+        nlohmann::json j;
+        j["room_version"] = "10";
+        nlohmann::json evt;
+        evt["type"] = "m.room.member";
+        evt["sender"] = p["userId"];
+        evt["room_id"] = p["roomId"];
+        evt["state_key"] = p["userId"];
+        evt["content"] = {{"membership", "leave"}};
+        evt["depth"] = 1;
+        j["event"] = evt;
+        Res r{bhttp::status::ok, 11};
+        phttp::set_json(r, j.dump());
+        return r;
+      },
+      "fed_make_leave");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/federation/v1/send_leave/{roomId}/{eventId}",
+      [](Req&&, Params) -> Res {
+        nlohmann::json j;
+        j["auth_chain"] = nlohmann::json::array();
+        j["state"] = nlohmann::json::array();
+        Res r{bhttp::status::ok, 11};
+        phttp::set_json(r, j.dump());
+        return r;
+      },
+      "fed_send_leave");
+
   // query profile
   router.add_route(
       bhttp::verb::get, "/_matrix/federation/v1/query/profile",

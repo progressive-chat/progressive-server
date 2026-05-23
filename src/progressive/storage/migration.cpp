@@ -407,6 +407,21 @@ void apply_schema(DatabasePool& db) {
           session_id TEXT PRIMARY KEY, user_id TEXT,
           data TEXT, created_ts BIGINT, expires_ts BIGINT
       );
+      CREATE TABLE IF NOT EXISTS blocked_rooms (
+          room_id TEXT PRIMARY KEY, blocked_by TEXT, reason TEXT, blocked_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS user_external_ids (
+          auth_provider TEXT NOT NULL, external_id TEXT NOT NULL,
+          user_id TEXT NOT NULL, PRIMARY KEY (auth_provider, external_id)
+      );
+      CREATE TABLE IF NOT EXISTS sticky_events (
+          event_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
+          stuck_by TEXT, stuck_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS user_approvals (
+          user_id TEXT PRIMARY KEY, approved INTEGER DEFAULT 0,
+          approved_by TEXT, approved_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

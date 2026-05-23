@@ -2844,6 +2844,196 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "admin_make_room_admin");
 
+  // password policy
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/password_policy",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["m.minimum_length"] = 8;
+        resp["m.require_digit"] = false;
+        resp["m.require_lowercase"] = false;
+        resp["m.require_uppercase"] = false;
+        resp["m.require_special"] = false;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "password_policy");
+
+  // registration token individual CRUD
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/registration_tokens/{token}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM registration_tokens WHERE token='" +
+                               sql_esc(p["token"]) + "'");
+        if (rows.empty())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Token not found");
+        nlohmann::json resp;
+        resp["token"] = rows[0]["token"];
+        resp["uses_allowed"] = 1;
+        resp["completed"] = rows[0].value("used", 0);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_reg_token_get");
+
+  router.add_route(
+      bhttp::verb::delete_, "/_synapse/admin/v1/registration_tokens/{token}",
+      [db_](Req&&, Params p) -> Res {
+        db_->execute("DELETE FROM registration_tokens WHERE token='" + sql_esc(p["token"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_reg_token_delete");
+
+  // admin: force delete device
+  router.add_route(
+      bhttp::verb::delete_, "/_synapse/admin/v2/users/{userId}/devices/{deviceId}",
+      [db_](Req&&, Params p) -> Res {
+        db_->execute("DELETE FROM access_tokens WHERE user_id='" + sql_esc(p["userId"]) +
+                     "' AND device_id='" + sql_esc(p["deviceId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_delete_device");
+
+  // admin: blocked rooms list
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/rooms/{roomId}/block",
+      [db_](Req&&, Params p) -> Res {
+        auto rows =
+            db_->query("SELECT * FROM blocked_rooms WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        nlohmann::json resp;
+        resp["blocked"] = !rows.empty();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_block_status");
+
+  // sticky events (MSC4354)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/sticky/{eventId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute(
+            "INSERT OR REPLACE INTO sticky_events (event_id,room_id,stuck_by,stuck_ts) VALUES ('" +
+            sql_esc(p["eventId"]) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(r.user_id) +
+            "'," + std::to_string(util::now_ms()) + ")");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "sticky_event");
+
+  // user approval (MSC3866)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/org.matrix.msc3866/account_status",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query("SELECT approved FROM user_approvals WHERE user_id='" +
+                               sql_esc(r.user_id) + "'");
+        nlohmann::json resp;
+        resp["approved"] = (!rows.empty() && rows[0].value("approved", 0) == 1);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "user_approval_status");
+
+  // external ID lookup
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/users/{userId}/external_ids",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM user_external_ids WHERE user_id='" +
+                               sql_esc(p["userId"]) + "'");
+        nlohmann::json resp;
+        resp["external_ids"] = nlohmann::json::array();
+        for (auto& r : rows) {
+          nlohmann::json eid;
+          eid["auth_provider"] = r["auth_provider"];
+          eid["external_id"] = r["external_id"];
+          resp["external_ids"].push_back(eid);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_external_ids");
+
+  // room delete v2 admin
+  router.add_route(
+      bhttp::verb::delete_, "/_synapse/admin/v2/rooms/{roomId}",
+      [db_](Req&&, Params p) -> Res {
+        auto delete_id = util::random_token(16);
+        db_->execute("DELETE FROM events WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        db_->execute("DELETE FROM room_memberships WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        db_->execute("DELETE FROM room_aliases WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        db_->execute("DELETE FROM rooms WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        nlohmann::json resp;
+        resp["delete_id"] = delete_id;
+        resp["status"] = "complete";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_delete_room_v2");
+
+  // room delete status
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v2/rooms/{roomId}/delete_status",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["status"] = "complete";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_delete_status");
+
+  // event redaction cascade
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/redact/{eventId}/{txnId}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string eid = "$" + util::random_token(43) + ":" + sn;
+        // Cascade redact: find all relations and mark them too
+        auto related = db_->query("SELECT event_id FROM event_relations WHERE relates_to_id='" +
+                                  sql_esc(p["eventId"]) + "'");
+        for (auto& rel : related) {
+          db_->execute("UPDATE events SET content=content||'\"redacted\":true' WHERE event_id='" +
+                       sql_esc(rel["event_id"].template get<std::string>()) + "'");
+        }
+        db_->execute("UPDATE events SET content=content||'\"redacted\":true' WHERE event_id='" +
+                     sql_esc(p["eventId"]) + "'");
+        nlohmann::json resp;
+        resp["event_id"] = eid;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_redact_cascade");
+
   // .well-known
   router.add_route(
       bhttp::verb::get, "/.well-known/matrix/client",

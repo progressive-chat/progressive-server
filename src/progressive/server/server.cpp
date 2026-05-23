@@ -70,29 +70,34 @@ void Server::setup() {
                                            listener.tls_cert_path, listener.tls_key_path);
 
     http_server_->set_handler([this](boost_http::request<boost_http::string_body>&& req) {
-      // Simple rate limit: track request count per IP in a map
       static std::map<std::string, int, std::less<>> ip_counts;
       static std::mutex ip_mutex;
-
       auto ip_addr = std::string(req["X-Forwarded-For"]);
       if (ip_addr.empty())
         ip_addr = "127.0.0.1";
 
+      int count = 0;
       {
         std::lock_guard lock(ip_mutex);
         ip_counts[std::string(ip_addr)]++;
-        int count = ip_counts[std::string(ip_addr)];
-        if (count > 100) {
-          boost_http::response<boost_http::string_body> res{boost_http::status::too_many_requests,
-                                                            11};
-          progressive::http::set_json(
-              res, R"({"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"})");
-          progressive::http::set_cors(res);
-          return res;
-        }
+        count = ip_counts[std::string(ip_addr)];
       }
 
-      return router_.route(std::move(req));
+      if (count > 100) {
+        boost_http::response<boost_http::string_body> res{boost_http::status::too_many_requests,
+                                                          11};
+        progressive::http::set_json(
+            res, R"({"errcode":"M_LIMIT_EXCEEDED","error":"Too many requests"})");
+        res.set("X-RateLimit-Limit", "100");
+        res.set("X-RateLimit-Remaining", "0");
+        progressive::http::set_cors(res);
+        return res;
+      }
+
+      auto response = router_.route(std::move(req));
+      response.set("X-RateLimit-Limit", "100");
+      response.set("X-RateLimit-Remaining", std::to_string(std::max(0, 100 - count)));
+      return response;
     });
   }
 

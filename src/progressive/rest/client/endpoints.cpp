@@ -917,6 +917,157 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_hierarchy");
 
+  // room summary
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/summary",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT COUNT(*) as cnt FROM room_memberships WHERE room_id='" +
+                               sql_esc(p["roomId"]) + "' AND membership='join'");
+        int joined = 0;
+        if (!rows.empty() && rows[0]["cnt"].is_number())
+          joined = rows[0]["cnt"].template get<int>();
+        nlohmann::json resp;
+        resp["joined_member_count"] = joined;
+        resp["invited_member_count"] = 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_room_summary");
+
+  // event relations (proper)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/relations/{eventId}",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        auto rows = db_->query(
+            "SELECT event_id,type,sender,content FROM events WHERE content LIKE "
+            "'%\"m.relates_to\"%\"event_id\":\"%" +
+            sql_esc(p["eventId"]) + "%\"%' LIMIT 20");
+        for (auto& ev : rows) {
+          nlohmann::json r;
+          r["event_id"] = ev["event_id"];
+          r["type"] = ev["type"];
+          r["sender"] = ev["sender"];
+          try {
+            r["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            r["content"] = nlohmann::json::object();
+          }
+          resp["chunk"].push_back(r);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_relations");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/relations/{eventId}/{relType}",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        auto rows = db_->query(
+            "SELECT event_id,type,sender,content FROM events WHERE content LIKE "
+            "'%\"rel_type\":\"%" +
+            sql_esc(p["relType"]) + "%\"%' AND content LIKE '%\"event_id\":\"%" +
+            sql_esc(p["eventId"]) + "%\"%' LIMIT 20");
+        for (auto& ev : rows) {
+          nlohmann::json r;
+          r["event_id"] = ev["event_id"];
+          r["type"] = ev["type"];
+          try {
+            r["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            r["content"] = nlohmann::json::object();
+          }
+          resp["chunk"].push_back(r);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_relations_typed");
+
+  // thumbnail
+  router.add_route(
+      bhttp::verb::get, "/_matrix/media/v3/thumbnail/{serverName}/{mediaId}",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::not_found, HTTP11};
+        set_json(res, R"({"errcode":"M_NOT_FOUND","error":"Thumbnail not available"})");
+        return res;
+      },
+      "media_thumbnail");
+
+  // URL preview
+  router.add_route(
+      bhttp::verb::get, "/_matrix/media/v3/preview_url",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["matrix:image:size"] = 0;
+        resp["og:title"] = "Preview not available";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "media_preview");
+
+  // media config
+  router.add_route(
+      bhttp::verb::get, "/_matrix/media/v3/config",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["m.upload.size"] = 52428800;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        return res;
+      },
+      "media_config");
+
+  // appservice ping
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/appservice/{appserviceId}/ping",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        return res;
+      },
+      "appservice_ping");
+
+  // 3PID email requestToken
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/account/3pid/email/requestToken",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["sid"] = util::random_token(16);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_3pid_email");
+
+  // thread subscriptions
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/thread_subscriptions/{roomId}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["subscriptions"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_thread_subs");
+
   // room invite
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/invite",

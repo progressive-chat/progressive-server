@@ -387,6 +387,75 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_directory");
 
+  // media upload
+  router.add_route(
+      bhttp::verb::post, "/_matrix/media/v3/upload",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string mxc = "mxc://localhost/" + util::random_token(24);
+        nlohmann::json resp;
+        resp["content_uri"] = mxc;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "media_upload");
+
+  // presence
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/presence/{userId}/status",
+      [auth_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "presence_status");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/presence/{userId}/status",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["presence"] = "offline";
+        resp["last_active_ago"] = 3600000;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "presence_get");
+
+  // admin: list users
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v2/users",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT id,admin,deactivated FROM users");
+        nlohmann::json resp;
+        resp["users"] = nlohmann::json::array();
+        for (auto& r : rows) {
+          nlohmann::json u;
+          u["name"] = r["id"];
+          u["admin"] = r.value("admin", 0);
+          u["deactivated"] = r.value("deactivated", 0);
+          resp["users"].push_back(u);
+        }
+        resp["total"] = resp["users"].size();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_users");
+
   // CORS options
   router.add_route(
       bhttp::verb::options, "/*",

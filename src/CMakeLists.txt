@@ -70,6 +70,11 @@ if(SQLite3_FOUND OR TARGET PkgConfig::SQLite3)
   target_compile_definitions(progressive PUBLIC PROGRESSIVE_HAS_SQLITE=1)
 endif()
 
+if(PostgreSQL_FOUND)
+  target_link_libraries(progressive PUBLIC PostgreSQL::PostgreSQL)
+  target_compile_definitions(progressive PUBLIC PROGRESSIVE_HAS_POSTGRES=1)
+endif()
+
 # Main executable
 add_executable(progressive-server
   main.cpp

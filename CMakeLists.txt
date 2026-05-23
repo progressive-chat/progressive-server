@@ -36,6 +36,10 @@ endif()
 find_package(Boost CONFIG REQUIRED COMPONENTS url json)
 find_package(OpenSSL REQUIRED)
 
+if(PROGRESSIVE_USE_POSTGRES)
+  find_package(PostgreSQL QUIET)
+endif()
+
 if(PROGRESSIVE_USE_SQLITE)
   find_package(SQLite3 QUIET)
   if(NOT SQLite3_FOUND)

@@ -2290,6 +2290,145 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "admin_users");
 
+  // room initialSync (deprecated)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/initialSync",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["room_id"] = p["roomId"];
+        resp["messages"] = nlohmann::json::object();
+        resp["messages"]["chunk"] = nlohmann::json::array();
+        resp["messages"]["start"] = "t0";
+        resp["messages"]["end"] = "t1";
+        resp["state"] = nlohmann::json::array();
+        resp["membership"] = "join";
+        auto rows = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                               "' LIMIT 50");
+        for (auto& ev : rows) {
+          nlohmann::json e;
+          e["event_id"] = ev["event_id"];
+          e["type"] = ev["type"];
+          e["sender"] = ev["sender"];
+          try {
+            e["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            e["content"] = nlohmann::json::object();
+          }
+          resp["messages"]["chunk"].push_back(e);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_initial_sync");
+
+  // timestamp to event
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/timestamp_to_event",
+      [db_](Req&& req, Params p) -> Res {
+        auto target = std::string(req.target());
+        auto ts = target.find("ts=");
+        std::string ts_val = (ts != std::string::npos) ? target.substr(ts + 3, 13) : "0";
+        auto rows = db_->query("SELECT event_id FROM events WHERE room_id='" +
+                               sql_esc(p["roomId"]) + "' ORDER BY depth LIMIT 1");
+        nlohmann::json resp;
+        resp["event_id"] = rows.empty() ? "" : rows[0]["event_id"].template get<std::string>();
+        resp["origin_server_ts"] = 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_timestamp_to_event");
+
+  // dehydrated device (MSC3814)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/org.matrix.msc3814.v1/dehydrated_device",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["device_id"] = "";
+        resp["device_data"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "dehydrated_device");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/org.matrix.msc3814.v1/dehydrated_device",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["device_id"] = util::random_token(10);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "dehydrated_device_put");
+
+  // admin: server version
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/server_version",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["server_version"] = "Progressive 0.1.0 (C++23)";
+        resp["python_version"] = "n/a";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_server_version");
+
+  // admin: user joined rooms
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/users/{userId}/joined_rooms",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT room_id FROM room_memberships WHERE user_id='" +
+                               sql_esc(p["userId"]) + "' AND membership='join'");
+        nlohmann::json resp;
+        resp["joined_rooms"] = nlohmann::json::array();
+        resp["total_rooms"] = rows.size();
+        for (auto& r : rows)
+          resp["joined_rooms"].push_back(r["room_id"]);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_user_rooms");
+
+  // admin: room members (admin view)
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/rooms/{roomId}/members",
+      [db_](Req&&, Params p) -> Res {
+        auto rows =
+            db_->query("SELECT user_id,membership,sender FROM room_memberships WHERE room_id='" +
+                       sql_esc(p["roomId"]) + "'");
+        nlohmann::json resp;
+        resp["members"] = nlohmann::json::array();
+        resp["total"] = rows.size();
+        for (auto& r : rows) {
+          nlohmann::json m;
+          m["user_id"] = r["user_id"];
+          m["membership"] = r["membership"];
+          resp["members"].push_back(m);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_room_members");
+
   // CORS options
   router.add_route(
       bhttp::verb::options, "/*",

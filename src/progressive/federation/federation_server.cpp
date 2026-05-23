@@ -191,6 +191,21 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
         }
         nlohmann::json j;
         j["room_version"] = "10";
+
+        // Get forward extremities as prev_events
+        auto fe = db.query("SELECT event_id FROM event_forward_extremities WHERE room_id='" +
+                           sql_esc(rid) + "'");
+        nlohmann::json prevs = nlohmann::json::array();
+        for (auto& f : fe)
+          prevs.push_back(f["event_id"].template get<std::string>());
+
+        // Get last few events as auth_events
+        auto auth = db.query("SELECT event_id FROM events WHERE room_id='" + sql_esc(rid) +
+                             "' ORDER BY depth DESC LIMIT 5");
+        nlohmann::json auths = nlohmann::json::array();
+        for (auto& a : auth)
+          auths.push_back(a["event_id"].template get<std::string>());
+
         nlohmann::json evt;
         evt["type"] = "m.room.member";
         evt["sender"] = p["userId"];
@@ -198,8 +213,8 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
         evt["state_key"] = p["userId"];
         evt["content"] = {{"membership", "join"}};
         evt["depth"] = 1;
-        evt["auth_events"] = nlohmann::json::array();
-        evt["prev_events"] = nlohmann::json::array();
+        evt["auth_events"] = auths;
+        evt["prev_events"] = prevs;
         j["event"] = evt;
 
         Res r{bhttp::status::ok, 11};
@@ -239,6 +254,12 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
                   sql_esc(eid) + "','" + sql_esc(p["roomId"]) + "','" +
                   sql_esc(evt.value("state_key", std::string{})) + "','join','" +
                   sql_esc(evt.value("sender", std::string{})) + "')");
+
+              // Update forward extremities
+              db.execute("DELETE FROM event_forward_extremities WHERE room_id='" +
+                         sql_esc(p["roomId"]) + "'");
+              db.execute("INSERT INTO event_forward_extremities (event_id,room_id) VALUES ('" +
+                         sql_esc(eid) + "','" + sql_esc(p["roomId"]) + "')");
             }
           }
 

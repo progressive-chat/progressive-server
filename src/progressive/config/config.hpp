@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "../email/config.hpp"
+#include "../redis/config.hpp"
+#include "../sso/config.hpp"
+
 namespace progressive::config {
 
 struct ListenerConfig {
@@ -37,6 +41,9 @@ struct DatabaseConfigSection {
 struct Config {
   ServerConfigSection server;
   DatabaseConfigSection database;
+  sso::SsoConfig sso;
+  email::EmailConfig email;
+  redis::RedisConfig redis;
   std::optional<std::string> config_path;
 
   static Config load(std::string_view path);

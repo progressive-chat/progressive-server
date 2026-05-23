@@ -422,6 +422,11 @@ void apply_schema(DatabasePool& db) {
           user_id TEXT PRIMARY KEY, approved INTEGER DEFAULT 0,
           approved_by TEXT, approved_ts BIGINT
       );
+      CREATE TABLE IF NOT EXISTS email_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          recipient TEXT NOT NULL, subject TEXT, body TEXT,
+          html_body TEXT, created_ts BIGINT, sent_ts BIGINT, status TEXT DEFAULT 'pending'
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

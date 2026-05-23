@@ -2861,6 +2861,75 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "password_policy");
 
+  // SSO redirect (OIDC/SAML/CAS)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/login/sso/redirect",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["redirect_url"] = "";
+        Res res{bhttp::status::not_found, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "sso_redirect");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/login/sso/redirect/{idp}",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::not_found, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "sso_redirect_idp");
+
+  // CAS ticket
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/login/cas/ticket",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::not_found, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "cas_ticket");
+
+  // SAML metadata
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/saml2/metadata.xml",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::not_found, HTTP11};
+        set_json(res, "{}");
+        return res;
+      },
+      "saml_metadata");
+
+  // CAPTCHA verify stub
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/account/3pid/email/requestToken",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["sid"] = util::random_token(16);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "captcha_email_token");
+
+  // email unsubscribe
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/unsubscribe",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::ok, HTTP11};
+        res.set(bhttp::field::content_type, "text/html");
+        res.body() = "<html><body>Unsubscribed</body></html>";
+        res.prepare_payload();
+        return res;
+      },
+      "email_unsubscribe");
+
   // registration token individual CRUD
   router.add_route(
       bhttp::verb::get, "/_synapse/admin/v1/registration_tokens/{token}",

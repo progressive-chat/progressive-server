@@ -221,3 +221,41 @@ TEST(RoomVersion, AllVersionsDefined) {
   EXPECT_NO_THROW(get_room_version("6"));
   EXPECT_NO_THROW(get_room_version("11"));
 }
+
+TEST(StateResolutionV2, PowerEventTiebreak) {
+  StateMap s1 = {{make_key("m.room.power_levels", ""), "$pl1"}};
+  StateMap s2 = {{make_key("m.room.power_levels", ""), "$pl2"}};
+  EventMap em;
+  em["$pl1"] = make_event("$pl1", "m.room.power_levels", "", "@a", 1, 100);
+  em["$pl1"].power_level = 100;
+  em["$pl2"] = make_event("$pl2", "m.room.power_levels", "", "@a", 1, 200);
+  em["$pl2"].power_level = 100;
+  auto v = get_room_version("10");
+  auto resolved = resolve_events(v, {s1, s2}, em);
+  auto pl_key = make_key("m.room.power_levels", "");
+  EXPECT_NE(resolved.find(pl_key), resolved.end());
+}
+
+TEST(StateResolutionV1, SingleSetV1) {
+  StateMap s1 = {{make_key("m.room.create", ""), "$c"}, {make_key("m.room.member", "@u"), "$m1"}};
+  EventMap em;
+  em["$c"] = make_event("$c", "m.room.create", "", "@u", 1);
+  em["$m1"] = make_event("$m1", "m.room.member", "@u", "@u", 2);
+  auto v = get_room_version("1");
+  auto resolved = resolve_events(v, {s1}, em);
+  EXPECT_EQ(resolved.size(), 2u);
+}
+
+TEST(AuthTypes, CreateEventRoomV1) {
+  auto v = get_room_version("1");
+  ResolvableEvent e = make_event("$ev", "m.room.message", "", "@s", 2);
+  auto types = auth_types_for_event(v, e);
+  EXPECT_GE(types.size(), 3u);
+}
+
+TEST(PowerEvent, MemberEventIsPower) {
+  auto self_leave = make_event("$m", "m.room.member", "@u", "@u", 3);
+  EXPECT_FALSE(is_power_event(self_leave));
+  auto ban = make_event("$m2", "m.room.member", "@admin", "@user", 3);
+  EXPECT_TRUE(is_power_event(ban));
+}

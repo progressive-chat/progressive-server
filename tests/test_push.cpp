@@ -284,3 +284,44 @@ TEST(ActionsToJson, Highlight) {
   EXPECT_EQ(j.size(), 1u);
   EXPECT_EQ(j[0]["set_tweak"], "highlight");
 }
+
+TEST(PushEvaluator, CallInvite) {
+  nlohmann::json ev;
+  ev["type"] = "m.call.invite";
+  ev["sender"] = "@bob:localhost";
+  ev["content"]["call_id"] = "call123";
+  PushRuleEvaluator evaluator(ev, 10);
+  auto actions = evaluator.run(all_base_rules(), "@alice:localhost", std::nullopt);
+  EXPECT_GT(actions.size(), 0u);
+}
+
+TEST(PushEvaluator, EncryptedEvent) {
+  nlohmann::json ev;
+  ev["type"] = "m.room.encrypted";
+  ev["sender"] = "@bob:localhost";
+  ev["content"]["algorithm"] = "m.megolm.v1";
+  PushRuleEvaluator evaluator(ev, 10);
+  auto actions = evaluator.run(all_base_rules(), "@alice:localhost", std::nullopt);
+  EXPECT_GT(actions.size(), 0u);
+}
+
+TEST(PushEvaluator, NoMatchForUnknownType) {
+  nlohmann::json ev;
+  ev["type"] = "com.example.unknown";
+  ev["sender"] = "@bob:localhost";
+  ev["content"] = nlohmann::json::object();
+  PushRuleEvaluator evaluator(ev, 10);
+  auto actions = evaluator.run(all_base_rules(), "@alice:localhost", std::nullopt);
+  EXPECT_EQ(actions.size(), 0u);
+}
+
+TEST(PushEvaluator, TombstoneNotification) {
+  nlohmann::json ev;
+  ev["type"] = "m.room.tombstone";
+  ev["sender"] = "@admin:localhost";
+  ev["state_key"] = "";
+  ev["content"]["replacement_room"] = "!new:localhost";
+  PushRuleEvaluator evaluator(ev, 10);
+  auto actions = evaluator.run(all_base_rules(), "@alice:localhost", std::nullopt);
+  EXPECT_GT(actions.size(), 0u);
+}

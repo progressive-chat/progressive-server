@@ -1986,6 +1986,30 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return r;
       },
       "well_known_client");
+
+  // r0 API version (legacy clients)
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/r0/login",
+      [auth_, db_, sn](Req&& req, Params) -> Res {
+        // Reuse same logic as v3 login — forward internally
+        // Simplified: return same response format
+        return error_response(bhttp::status::moved_permanently, "M_UNKNOWN", "Please use /v3/ API");
+      },
+      "r0_login");
+
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/r0/register",
+      [](Req&&, Params) -> Res {
+        return error_response(bhttp::status::moved_permanently, "M_UNKNOWN", "Please use /v3/ API");
+      },
+      "r0_register");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/r0/sync",
+      [](Req&&, Params) -> Res {
+        return error_response(bhttp::status::moved_permanently, "M_UNKNOWN", "Please use /v3/ API");
+      },
+      "r0_sync");
 }
 
 }  // namespace progressive::rest::client

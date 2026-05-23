@@ -185,3 +185,39 @@ TEST(StateResolutionV2, V1Fallback) {
   // V1 should also resolve (deeper wins in normal events)
   EXPECT_EQ(resolved[make_key("m.room.name", "")], "$e2");
 }
+
+TEST(StateResolutionV2, ThreeWayConflict) {
+  StateMap s1 = {{make_key("m.room.topic", ""), "$t1"}};
+  StateMap s2 = {{make_key("m.room.topic", ""), "$t2"}};
+  StateMap s3 = {{make_key("m.room.topic", ""), "$t3"}};
+  EventMap em;
+  em["$t1"] = make_event("$t1", "m.room.topic", "", "@a", 1, 100);
+  em["$t2"] = make_event("$t2", "m.room.topic", "", "@a", 2, 200);
+  em["$t3"] = make_event("$t3", "m.room.topic", "", "@a", 3, 300);
+  auto v = get_room_version("10");
+  auto resolved = resolve_events(v, {s1, s2, s3}, em);
+  EXPECT_EQ(resolved[make_key("m.room.topic", "")], "$t3");
+}
+
+TEST(StateSeparation, MultipleKeys) {
+  StateMap s1 = {{make_key("m.room.name", ""), "$n1"}, {make_key("m.room.topic", ""), "$t1"}};
+  StateMap s2 = {{make_key("m.room.name", ""), "$n1"}, {make_key("m.room.topic", ""), "$t2"}};
+  auto [un, con] = separate({s1, s2});
+  EXPECT_EQ(un.size(), 1u);
+  EXPECT_EQ(con.size(), 1u);
+}
+
+TEST(StateSeparation, ThreeSetsNoConflict) {
+  StateMap s1 = {{make_key("m.room.name", ""), "$n1"}};
+  StateMap s2 = {{make_key("m.room.name", ""), "$n1"}};
+  StateMap s3 = {{make_key("m.room.name", ""), "$n1"}};
+  auto [un, con] = separate({s1, s2, s3});
+  EXPECT_EQ(un.size(), 1u);
+  EXPECT_EQ(con.size(), 0u);
+}
+
+TEST(RoomVersion, AllVersionsDefined) {
+  EXPECT_NO_THROW(get_room_version("1"));
+  EXPECT_NO_THROW(get_room_version("6"));
+  EXPECT_NO_THROW(get_room_version("11"));
+}

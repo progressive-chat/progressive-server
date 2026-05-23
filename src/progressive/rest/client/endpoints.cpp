@@ -771,6 +771,22 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_devices");
 
+  // delete device
+  router.add_route(
+      bhttp::verb::delete_, "/_matrix/client/v3/devices/{deviceId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM access_tokens WHERE user_id='" + sql_esc(r.user_id) +
+                     "' AND device_id='" + sql_esc(p["deviceId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_delete_device");
+
   // notifications
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/notifications",
@@ -899,6 +915,24 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return res;
       },
       "client_ban");
+
+  // room unban
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/unban",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        db_->execute("UPDATE room_memberships SET membership='leave' WHERE room_id='" +
+                     sql_esc(p["roomId"]) + "' AND user_id='" + sql_esc(uid) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_unban");
 
   // room forget
   router.add_route(
@@ -1383,426 +1417,38 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "admin_users");
 
-  // to-device messaging
+  // admin: delete room
   router.add_route(
-      bhttp::verb::put, "/_matrix/client/v3/sendToDevice/{eventType}/{txnId}",
-      [auth_, db_](Req&& req, Params p) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto body = nlohmann::json::parse(req.body());
-        uint64_t now = util::now_ms();
-        if (body.contains("messages") && body["messages"].is_object()) {
-          for (auto& [uid, devs] : body["messages"].items()) {
-            for (auto& [did, payload] : devs.items()) {
-              db_->execute(
-                  "INSERT INTO device_inbox (user_id,device_id,type,sender,"
-                  "content,stream_id) VALUES ('" +
-                  sql_esc(uid) + "','" + sql_esc(did) + "','" + sql_esc(p["eventType"]) + "','" +
-                  sql_esc(r.user_id) + "','" + sql_esc(payload.dump()) + "'," +
-                  std::to_string(now) + ")");
-            }
-          }
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, "{}");
-        set_cors(res);
-        return res;
-      },
-      "client_sendtodevice");
-
-  // server notices (admin send notice)
-  router.add_route(
-      bhttp::verb::post, "/_synapse/admin/v1/server_notices",
-      [db_, sn](Req&& req, Params) -> Res {
-        auto body = nlohmann::json::parse(req.body());
-        std::string uid = body.value("user_id", std::string{});
-        std::string msg =
-            body.value("content", nlohmann::json::object()).value("body", std::string{});
-        if (uid.empty()) {
-          Res r{bhttp::status::bad_request, HTTP11};
-          set_json(r, R"({"errcode":"M_BAD_JSON","error":"Missing user_id"})");
-          return r;
-        }
-        auto rid = RoomID::from_string("!server_notices:" + sn);
-        auto ev = events::create_local_event(rid, "m.room.message", "@server:" + sn,
-                                             {{"msgtype", "m.text"}, {"body", msg}});
-        ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
-        uint64_t now = util::now_ms();
-        db_->execute(
-            "INSERT INTO events (event_id,room_id,type,sender,content,state_key,depth,"
-            "origin_server_ts,stream_ordering) VALUES ('" +
-            sql_esc(ev.event_id.to_string()) + "','" + sql_esc(rid.to_string()) +
-            "','m.room.message','@server:" + sn + "','" + sql_esc(ev.content.dump()) + "','',1,'" +
-            sql_esc(ev.origin_server_ts) + "'," + std::to_string(now) + ")");
-        nlohmann::json resp;
-        resp["event_id"] = ev.event_id.to_string();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "server_notices");
-
-  // Prometheus metrics
-  router.add_route(
-      bhttp::verb::get, "/_synapse/metrics",
-      [](Req&&, Params) -> Res {
-        static std::atomic<uint64_t> http_requests{0};
-        static std::atomic<uint64_t> events_created{0};
-        http_requests++;
-        std::string body =
-            "# HELP progressive_http_requests_total Total HTTP requests\n"
-            "# TYPE progressive_http_requests_total counter\n"
-            "progressive_http_requests_total " +
-            std::to_string(http_requests) +
-            "\n"
-            "# HELP progressive_events_processed_total Total events\n"
-            "# TYPE progressive_events_processed_total counter\n"
-            "progressive_events_processed_total " +
-            std::to_string(events_created) +
-            "\n"
-            "# HELP progressive_database_connections Database connections\n"
-            "# TYPE progressive_database_connections gauge\n"
-            "progressive_database_connections 1\n";
-        Res res{bhttp::status::ok, HTTP11};
-        res.set(bhttp::field::content_type, "text/plain");
-        res.body() = body;
-        res.prepare_payload();
-        return res;
-      },
-      "metrics");
-
-  // .well-known/matrix/server
-  router.add_route(
-      bhttp::verb::get, "/.well-known/matrix/server",
-      [](Req&&, Params) -> Res {
-        nlohmann::json j;
-        j["m.server"] = "localhost:8448";
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, j.dump());
-        set_cors(res);
-        return res;
-      },
-      "well_known_server");
-
-  // health check
-  router.add_route(
-      bhttp::verb::get, "/health",
-      [](Req&&, Params) -> Res {
-        nlohmann::json j;
-        j["status"] = "ok";
-        j["version"] = "0.1.0";
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, j.dump());
-        return res;
-      },
-      "health");
-
-  // third party networks
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/thirdparty/protocols",
-      [auth_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        nlohmann::json resp;
-        resp["protocols"] = nlohmann::json::object();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_thirdparty");
-
-  // SSO redirect
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/login/sso/redirect",
-      [](Req&&, Params) -> Res {
-        return error_response(bhttp::status::not_found, "M_NOT_FOUND", "SSO not configured");
-      },
-      "client_sso_redirect");
-
-  // SSO token
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/login/sso/token",
-      [](Req&&, Params) -> Res {
-        return error_response(bhttp::status::forbidden, "M_FORBIDDEN", "SSO token not valid");
-      },
-      "client_sso_token");
-
-  // login token
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/login/get_token",
-      [](Req&&, Params) -> Res {
-        return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Not supported");
-      },
-      "client_login_token");
-
-  // registration email token
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/register/email/requestToken",
-      [](Req&&, Params) -> Res {
-        nlohmann::json resp;
-        resp["sid"] = util::random_token(16);
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_reg_email");
-
-  // username availability
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/register/available",
-      [db_](Req&& req, Params) -> Res {
-        auto user = std::string(req.target());
-        auto p = user.find("username=");
-        if (p != std::string::npos)
-          user = user.substr(p + 9);
-        auto ep = user.find('&');
-        if (ep != std::string::npos)
-          user = user.substr(0, ep);
-        auto rows = db_->query("SELECT id FROM users WHERE id='@" + sql_esc(user) + ":localhost'");
-        nlohmann::json resp;
-        resp["available"] = rows.empty();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_available");
-
-  // user directory search
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/user_directory/search",
-      [auth_, db_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto body = nlohmann::json::parse(req.body());
-        std::string term = body.value("search_term", std::string{});
-        nlohmann::json resp;
-        resp["results"] = nlohmann::json::array();
-        resp["limited"] = false;
-        if (!term.empty()) {
-          auto rows = db_->query("SELECT id FROM users WHERE id LIKE '%" + term + "%' LIMIT 20");
-          for (auto& row : rows) {
-            nlohmann::json u;
-            u["user_id"] = row["id"];
-            u["display_name"] = row["id"];
-            resp["results"].push_back(u);
-          }
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_user_directory");
-
-  // pushers
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/pushers",
-      [auth_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        nlohmann::json resp;
-        resp["pushers"] = nlohmann::json::array();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_pushers");
-
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/pushers/set",
-      [auth_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, "{}");
-        set_cors(res);
-        return res;
-      },
-      "client_pusher_set");
-
-  // event relations
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/relations/{eventId}",
-      [auth_, db_](Req&& req, Params p) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        nlohmann::json resp;
-        resp["chunk"] = nlohmann::json::array();
-        resp["original_event"] = nlohmann::json::object();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_relations");
-
-  // read markers — with persistence
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/read_markers",
-      [auth_, db_](Req&& req, Params p) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        try {
-          auto body = nlohmann::json::parse(req.body());
-          std::string fully_read = body.value("m.fully_read", std::string{});
-          std::string read_receipt = body.value("m.read", std::string{});
-          uint64_t now = util::now_ms();
-          if (!fully_read.empty()) {
-            db_->execute(
-                "INSERT OR REPLACE INTO read_markers (user_id,room_id,event_id,updated_ts) "
-                "VALUES ('" +
-                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(fully_read) +
-                "'," + std::to_string(now) + ")");
-          }
-          if (!read_receipt.empty()) {
-            db_->execute(
-                "INSERT OR REPLACE INTO read_receipts (user_id,room_id,event_id,updated_ts) "
-                "VALUES ('" +
-                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(read_receipt) +
-                "'," + std::to_string(now) + ")");
-          }
-        } catch (...) {
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, "{}");
-        set_cors(res);
-        return res;
-      },
-      "client_read_markers");
-
-  // public rooms
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/publicRooms",
-      [auth_, db_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto rows = db_->query("SELECT room_id,creator FROM rooms WHERE is_public=1 LIMIT 50");
-        nlohmann::json resp;
-        resp["chunk"] = nlohmann::json::array();
-        resp["total_room_count_estimate"] = rows.size();
-        for (auto& row : rows) {
-          nlohmann::json room;
-          room["room_id"] = row["room_id"];
-          room["name"] = row["room_id"];
-          room["num_joined_members"] = 1;
-          resp["chunk"].push_back(room);
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_public_rooms");
-
-  router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/publicRooms",
-      [auth_, db_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto rows = db_->query("SELECT room_id,creator FROM rooms WHERE is_public=1 LIMIT 50");
-        nlohmann::json resp;
-        resp["chunk"] = nlohmann::json::array();
-        resp["total_room_count_estimate"] = rows.size();
-        for (auto& row : rows) {
-          nlohmann::json room;
-          room["room_id"] = row["room_id"];
-          room["name"] = row["room_id"];
-          room["num_joined_members"] = 1;
-          resp["chunk"].push_back(room);
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_public_rooms_post");
-
-  // joined rooms
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/joined_rooms",
-      [auth_, db_](Req&& req, Params) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto rows = db_->query("SELECT room_id FROM room_memberships WHERE user_id='" +
-                               sql_esc(r.user_id) + "' AND membership='join'");
-        nlohmann::json resp;
-        resp["joined_rooms"] = nlohmann::json::array();
-        for (auto& row : rows)
-          if (!row["room_id"].is_null())
-            resp["joined_rooms"].push_back(row["room_id"]);
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "client_joined_rooms");
-
-  // room visibility
-  router.add_route(
-      bhttp::verb::put, "/_matrix/client/v3/directory/list/room/{roomId}",
-      [auth_, db_](Req&& req, Params p) -> Res {
-        auto r = check_auth(*auth_, req);
-        if (!r.success)
-          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        auto body = nlohmann::json::parse(req.body());
-        auto vis = body.value("visibility", std::string{"private"});
-        db_->execute("UPDATE rooms SET is_public=" + std::string(vis == "public" ? "1" : "0") +
-                     " WHERE room_id='" + sql_esc(p["roomId"]) + "'");
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, "{}");
-        set_cors(res);
-        return res;
-      },
-      "client_dir_visibility");
-
-  router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/directory/list/room/{roomId}",
+      bhttp::verb::delete_, "/_synapse/admin/v1/rooms/{roomId}",
       [db_](Req&&, Params p) -> Res {
-        auto rows =
-            db_->query("SELECT is_public FROM rooms WHERE room_id='" + sql_esc(p["roomId"]) + "'");
-        nlohmann::json resp;
-        resp["visibility"] =
-            (!rows.empty() && rows[0].value("is_public", 0) == 1) ? "public" : "private";
+        db_->execute("DELETE FROM events WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        db_->execute("DELETE FROM room_memberships WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        db_->execute("DELETE FROM rooms WHERE room_id='" + sql_esc(p["roomId"]) + "'");
         Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
+        set_json(res, "{}");
         set_cors(res);
         return res;
       },
-      "client_dir_get_visibility");
+      "admin_delete_room");
 
-  // 3PID management
+  // delete room alias
   router.add_route(
-      bhttp::verb::get, "/_matrix/client/v3/account/3pid",
-      [auth_](Req&& req, Params) -> Res {
+      bhttp::verb::delete_, "/_matrix/client/v3/directory/room/{roomAlias}",
+      [auth_, db_](Req&& req, Params p) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        nlohmann::json resp;
-        resp["threepids"] = nlohmann::json::array();
+        db_->execute("DELETE FROM room_aliases WHERE alias='#" + sql_esc(p["roomAlias"]) + "'");
         Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
+        set_json(res, "{}");
         set_cors(res);
         return res;
       },
-      "client_3pid");
+      "client_delete_alias");
 
+  // 3PID unbind
   router.add_route(
-      bhttp::verb::post, "/_matrix/client/v3/account/3pid/add",
+      bhttp::verb::post, "/_matrix/client/v3/account/3pid/unbind",
       [auth_](Req&& req, Params) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
@@ -1812,69 +1458,7 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         set_cors(res);
         return res;
       },
-      "client_3pid_add");
-
-  // admin: list rooms
-  router.add_route(
-      bhttp::verb::get, "/_synapse/admin/v1/rooms",
-      [db_](Req&&, Params) -> Res {
-        auto rows = db_->query("SELECT room_id,creator,is_public FROM rooms");
-        nlohmann::json resp;
-        resp["rooms"] = nlohmann::json::array();
-        resp["total_rooms"] = rows.size();
-        for (auto& row : rows) {
-          nlohmann::json r;
-          r["room_id"] = row["room_id"];
-          r["creator"] = row.value("creator", "unknown");
-          resp["rooms"].push_back(r);
-        }
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "admin_rooms");
-
-  // admin: room details
-  router.add_route(
-      bhttp::verb::get, "/_synapse/admin/v1/rooms/{roomId}",
-      [db_](Req&&, Params p) -> Res {
-        auto rows = db_->query("SELECT * FROM rooms WHERE room_id='" + sql_esc(p["roomId"]) + "'");
-        if (rows.empty())
-          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Room not found");
-        nlohmann::json resp;
-        resp["room_id"] = rows[0]["room_id"];
-        resp["creator"] = rows[0].value("creator", "unknown");
-        auto evrows = db_->query("SELECT COUNT(*) as cnt FROM events WHERE room_id='" +
-                                 sql_esc(p["roomId"]) + "'");
-        resp["events_count"] =
-            evrows.empty()
-                ? 0
-                : (evrows[0]["cnt"].is_number() ? evrows[0]["cnt"].template get<int>() : 0);
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "admin_room_detail");
-
-  // admin: user details
-  router.add_route(
-      bhttp::verb::get, "/_synapse/admin/v2/users/{userId}",
-      [db_](Req&&, Params p) -> Res {
-        auto rows = db_->query("SELECT * FROM users WHERE id='" + sql_esc(p["userId"]) + "'");
-        if (rows.empty())
-          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "User not found");
-        nlohmann::json resp;
-        resp["name"] = rows[0]["id"];
-        resp["admin"] = rows[0].value("admin", 0);
-        resp["deactivated"] = rows[0].value("deactivated", 0);
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
-      },
-      "admin_user_detail");
+      "client_3pid_unbind");
 
   // media upload — now handled by media module
 

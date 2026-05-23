@@ -355,6 +355,18 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
             }
 
             ej["unsigned"] = nlohmann::json::object();
+            // Redaction check
+            auto cstr = ev["content"].template get<std::string>();
+            if (cstr.find("redacted_because") != std::string::npos) {
+              try {
+                auto cj = nlohmann::json::parse(cstr);
+                if (cj.contains("redacted_because")) {
+                  ej["unsigned"]["redacted_because"] = cj["redacted_because"];
+                  ej["content"] = nlohmann::json::object();
+                }
+              } catch (...) {
+              }
+            }
             // Bundled aggregations: reactions
             auto rels = db_->query(
                 "SELECT event_id,type,sender,content FROM events WHERE content LIKE "
@@ -807,14 +819,28 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
   // e2ee keys upload
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/keys/upload",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
         auto body = nlohmann::json::parse(req.body());
+        // Store one-time keys
+        if (body.contains("one_time_keys") && body["one_time_keys"].is_object()) {
+          for (auto& [kid, kdata] : body["one_time_keys"].items())
+            db_->execute(
+                "INSERT OR REPLACE INTO device_inbox (user_id,device_id,type,sender,"
+                "content,stream_id) VALUES ('" +
+                sql_esc(r.user_id) + "','otk','" + sql_esc(kid) + "','" + sql_esc(r.user_id) +
+                "','" + sql_esc(kdata.dump()) + "',0)");
+        }
+        // Count remaining one-time keys
+        auto cnt = db_->query("SELECT COUNT(*) as cnt FROM device_inbox WHERE user_id='" +
+                              sql_esc(r.user_id) + "' AND device_id='otk'");
         nlohmann::json resp;
         resp["one_time_key_counts"] = nlohmann::json::object();
-        resp["one_time_key_counts"]["signed_curve25519"] = 0;
+        int count =
+            (!cnt.empty() && cnt[0]["cnt"].is_number()) ? cnt[0]["cnt"].template get<int>() : 0;
+        resp["one_time_key_counts"]["signed_curve25519"] = count;
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);
@@ -1654,6 +1680,108 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return res;
       },
       "client_3pid_unbind");
+
+  // admin: shadow ban
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/users/{userId}/shadow_ban",
+      [db_](Req&&, Params p) -> Res {
+        db_->execute("UPDATE users SET deactivated=2 WHERE id='" + sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_shadow_ban");
+
+  // admin: make admin
+  router.add_route(
+      bhttp::verb::put, "/_synapse/admin/v1/users/{userId}/admin",
+      [db_](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        int admin = body.value("admin", 0);
+        db_->execute("UPDATE users SET admin=" + std::to_string(admin) + " WHERE id='" +
+                     sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_make_admin");
+
+  // admin: registration tokens CRUD
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/registration_tokens",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT token,used FROM registration_tokens");
+        nlohmann::json resp;
+        resp["registration_tokens"] = nlohmann::json::array();
+        for (auto& r : rows) {
+          nlohmann::json t;
+          t["token"] = r["token"];
+          t["uses_allowed"] = 1;
+          t["completed"] = r.value("used", 0);
+          resp["registration_tokens"].push_back(t);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_reg_tokens");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/registration_tokens/new",
+      [db_](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string tok = body.value("token", util::random_token(24));
+        db_->execute("INSERT INTO registration_tokens (token,created_ts) VALUES ('" + sql_esc(tok) +
+                     "'," + std::to_string(util::now_ms()) + ")");
+        nlohmann::json resp;
+        resp["token"] = tok;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_reg_token_create");
+
+  // admin: room stats
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/statistics/database/rooms",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT room_id,creator FROM rooms LIMIT 10");
+        nlohmann::json resp;
+        resp["rooms"] = nlohmann::json::array();
+        for (auto& r : rows) {
+          auto cnt = db_->query("SELECT COUNT(*) as c FROM events WHERE room_id='" +
+                                sql_esc(r["room_id"].template get<std::string>()) + "'");
+          nlohmann::json room;
+          room["room_id"] = r["room_id"];
+          room["creator"] = r.value("creator", "");
+          room["events"] =
+              (!cnt.empty() && cnt[0]["c"].is_number()) ? cnt[0]["c"].template get<int>() : 0;
+          resp["rooms"].push_back(room);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_room_stats");
+
+  // admin: background updates
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/background_updates/status",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["enabled"] = true;
+        resp["current_background_updates"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_bg_updates");
 
   // media upload — now handled by media module
 

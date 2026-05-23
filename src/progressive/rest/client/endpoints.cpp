@@ -311,6 +311,30 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
             if (!ev["state_key"].is_null() && !ev["state_key"].template get<std::string>().empty())
               ej["state_key"] = ev["state_key"];
             ej["unsigned"] = nlohmann::json::object();
+            // Bundled aggregations: reactions
+            auto rels = db_->query(
+                "SELECT event_id,type,sender,content FROM events WHERE content LIKE "
+                "'%\"m.relates_to\"%\"event_id\":\"%" +
+                sql_esc(ev["event_id"].template get<std::string>()) + "%\"%' LIMIT 10");
+            if (!rels.empty()) {
+              nlohmann::json aggs;
+              aggs["m.annotation"] = nlohmann::json::object();
+              aggs["m.annotation"]["chunk"] = nlohmann::json::array();
+              aggs["m.annotation"]["count"] = rels.size();
+              for (auto& rel : rels) {
+                nlohmann::json re;
+                re["type"] = rel["type"];
+                re["event_id"] = rel["event_id"];
+                re["sender"] = rel["sender"];
+                try {
+                  re["content"] = nlohmann::json::parse(rel["content"].template get<std::string>());
+                } catch (...) {
+                  re["content"] = nlohmann::json::object();
+                }
+                aggs["m.annotation"]["chunk"].push_back(re);
+              }
+              ej["unsigned"]["m.relations"] = aggs;
+            }
             rd["timeline"]["events"].push_back(ej);
           }
           resp["rooms"]["join"][rid] = rd;

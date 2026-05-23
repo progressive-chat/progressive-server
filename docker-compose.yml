@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  progressive:
+    build: .
+    ports:
+      - "8008:8008"
+      - "8448:8448"
+    volumes:
+      - ./homeserver.yaml:/etc/progressive/homeserver.yaml:ro
+      - progressive_media:/var/lib/progressive/media
+      - progressive_data:/var/lib/progressive/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: progressive
+      POSTGRES_PASSWORD: progressive
+      POSTGRES_DB: progressive
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U progressive"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  progressive_media:
+  progressive_data:

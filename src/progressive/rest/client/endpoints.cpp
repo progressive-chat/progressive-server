@@ -844,6 +844,231 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_capabilities");
 
+  // room upgrade
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/upgrade",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string new_ver = body.value("new_version", std::string{"10"});
+        std::string new_local = "!" + util::random_token(18);
+        std::string new_rid = new_local + ":" + sn;
+        uint64_t now = util::now_ms();
+        db_->execute("INSERT INTO rooms (room_id,creator,creation_ts) VALUES ('" +
+                     sql_esc(new_rid) + "','" + sql_esc(r.user_id) + "'," + std::to_string(now) +
+                     ")");
+        nlohmann::json resp;
+        resp["replacement_room"] = new_rid;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_upgrade");
+
+  // knock
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/knock/{roomIdOrAlias}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["room_id"] = p["roomIdOrAlias"];
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_knock");
+
+  // server ACL
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/state/m.room.server_acl",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                               "' AND type='m.room.server_acl' LIMIT 1");
+        if (rows.empty())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Server ACL not found");
+        nlohmann::json resp;
+        try {
+          resp = nlohmann::json::parse(rows[0]["content"].template get<std::string>());
+        } catch (...) {
+          resp = nlohmann::json::object();
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_server_acl");
+
+  // room report
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/report/{eventId}",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_report");
+
+  // room preview
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/preview/{eventId}",
+      [](Req&&, Params) -> Res {
+        return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Not implemented");
+      },
+      "client_preview");
+
+  // change password
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/account/password",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string new_pw = body.value("new_password", std::string{});
+        if (new_pw.empty())
+          return error_response(bhttp::status::bad_request, "M_BAD_JSON", "Missing new_password");
+        std::string hash = auth_->hash_password(new_pw);
+        db_->execute("UPDATE users SET password_hash='" + sql_esc(hash) + "' WHERE id='" +
+                     sql_esc(r.user_id) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_password");
+
+  // deactivate account
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/account/deactivate",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("UPDATE users SET deactivated=1 WHERE id='" + sql_esc(r.user_id) + "'");
+        db_->execute("DELETE FROM access_tokens WHERE user_id='" + sql_esc(r.user_id) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_deactivate");
+
+  // push rules
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/pushrules/",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["global"] = nlohmann::json::object();
+        resp["global"]["override"] = nlohmann::json::array();
+        resp["global"]["content"] = nlohmann::json::array();
+        resp["global"]["room"] = nlohmann::json::array();
+        resp["global"]["sender"] = nlohmann::json::array();
+        resp["global"]["underride"] = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_pushrules");
+
+  // OpenID
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/user/{userId}/openid/request_token",
+      [auth_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["access_token"] = util::random_token(32);
+        resp["token_type"] = "Bearer";
+        resp["matrix_server_name"] = "localhost";
+        resp["expires_in"] = 3600;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_openid");
+
+  // TURN server
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/voip/turnServer",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["uris"] = nlohmann::json::array();
+        resp["ttl"] = 86400;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_turn");
+
+  // Prometheus metrics (basic stubs)
+  router.add_route(
+      bhttp::verb::get, "/_synapse/metrics",
+      [](Req&&, Params) -> Res {
+        std::string body =
+            "# HELP progressive_http_requests_total Total HTTP requests\n"
+            "# TYPE progressive_http_requests_total counter\n"
+            "progressive_http_requests_total 0\n"
+            "# HELP progressive_events_processed_total Total events processed\n"
+            "# TYPE progressive_events_processed_total counter\n"
+            "progressive_events_processed_total 0\n";
+        Res res{bhttp::status::ok, HTTP11};
+        res.set(bhttp::field::content_type, "text/plain");
+        res.body() = body;
+        res.prepare_payload();
+        return res;
+      },
+      "metrics");
+
+  // .well-known/matrix/server
+  router.add_route(
+      bhttp::verb::get, "/.well-known/matrix/server",
+      [](Req&&, Params) -> Res {
+        nlohmann::json j;
+        j["m.server"] = "localhost:8448";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, j.dump());
+        set_cors(res);
+        return res;
+      },
+      "well_known_server");
+
+  // third party networks
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/thirdparty/protocols",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["protocols"] = nlohmann::json::object();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_thirdparty");
+
   // media upload — now handled by media module
 
   // presence

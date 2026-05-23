@@ -26,10 +26,10 @@ public:
   nlohmann::json register_user(std::string_view user_id, std::string_view password);
   std::optional<Requester> get_user_by_token(std::string_view token);
   bool verify_password(std::string_view password, std::string_view hash) const;
+  std::string hash_password(std::string_view password) const;
 
 private:
   storage::DatabasePool& db_;
-  std::string hash_password(std::string_view password) const;
 };
 
 }  // namespace progressive::auth

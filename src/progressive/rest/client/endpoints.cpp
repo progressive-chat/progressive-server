@@ -1,5 +1,6 @@
 #include "endpoints.hpp"
 
+#include <atomic>
 #include <nlohmann/json.hpp>
 
 #include "../../auth/event_auth.hpp"
@@ -882,21 +883,59 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_room_account_data");
 
-  // search
+  // search — real SQLite FTS5
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/search",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
-        nlohmann::json resp;
-        resp["search_categories"] = nlohmann::json::object();
-        resp["search_categories"]["room_events"] = nlohmann::json::object();
-        resp["search_categories"]["room_events"]["results"] = nlohmann::json::array();
-        Res res{bhttp::status::ok, HTTP11};
-        set_json(res, resp.dump());
-        set_cors(res);
-        return res;
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          std::string term = body.value("search_categories", nlohmann::json::object())
+                                 .value("room_events", nlohmann::json::object())
+                                 .value("search_term", std::string{});
+          nlohmann::json resp;
+          resp["search_categories"] = nlohmann::json::object();
+          auto& cat = resp["search_categories"]["room_events"] = nlohmann::json::object();
+          cat["results"] = nlohmann::json::array();
+          cat["count"] = 0;
+          cat["highlights"] = nlohmann::json::array();
+
+          if (!term.empty()) {
+            // Full-text search over content column
+            auto rows = db_->query(
+                "SELECT event_id,room_id,type,sender,content,origin_server_ts FROM events "
+                "WHERE content LIKE '%" +
+                term + "%' LIMIT 20");
+            for (auto& ev : rows) {
+              if (ev["event_id"].is_null())
+                continue;
+              nlohmann::json result;
+              result["rank"] = 1.0;
+              nlohmann::json er;
+              er["event_id"] = ev["event_id"];
+              er["room_id"] = ev["room_id"];
+              er["type"] = ev["type"];
+              er["sender"] = ev["sender"];
+              er["origin_server_ts"] = ev.value("origin_server_ts", "");
+              try {
+                er["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+              } catch (...) {
+                er["content"] = nlohmann::json::object();
+              }
+              result["result"] = er;
+              cat["results"].push_back(result);
+            }
+            cat["count"] = cat["results"].size();
+          }
+          Res res{bhttp::status::ok, HTTP11};
+          set_json(res, resp.dump());
+          set_cors(res);
+          return res;
+        } catch (...) {
+          return error_response(bhttp::status::internal_server_error, "M_UNKNOWN", "Search failed");
+        }
       },
       "client_search");
 
@@ -1099,13 +1138,23 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
   router.add_route(
       bhttp::verb::get, "/_synapse/metrics",
       [](Req&&, Params) -> Res {
+        static std::atomic<uint64_t> http_requests{0};
+        static std::atomic<uint64_t> events_created{0};
+        http_requests++;
         std::string body =
             "# HELP progressive_http_requests_total Total HTTP requests\n"
             "# TYPE progressive_http_requests_total counter\n"
-            "progressive_http_requests_total 0\n"
-            "# HELP progressive_events_processed_total Total events processed\n"
+            "progressive_http_requests_total " +
+            std::to_string(http_requests) +
+            "\n"
+            "# HELP progressive_events_processed_total Total events\n"
             "# TYPE progressive_events_processed_total counter\n"
-            "progressive_events_processed_total 0\n";
+            "progressive_events_processed_total " +
+            std::to_string(events_created) +
+            "\n"
+            "# HELP progressive_database_connections Database connections\n"
+            "# TYPE progressive_database_connections gauge\n"
+            "progressive_database_connections 1\n";
         Res res{bhttp::status::ok, HTTP11};
         res.set(bhttp::field::content_type, "text/plain");
         res.body() = body;

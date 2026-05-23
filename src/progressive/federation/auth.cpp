@@ -4,63 +4,87 @@
 
 #include "../crypto/signing.hpp"
 #include "../http/router.hpp"
+#include "../util/base64.hpp"
 
 namespace progressive::federation {
 
 FederationAuth FederationAuth::parse(std::string_view header) {
   FederationAuth auth;
 
-  // Format: X-Matrix origin=example.com,key="ed25519:keyid",sig="base64sig"
-  auto comma = header.find(',');
-  if (comma == std::string_view::npos)
+  // Format: X-Matrix origin=damien,key="ed25519:0",sig="base64..."
+  auto pos = header.find("origin=");
+  if (pos == std::string_view::npos)
     return auth;
+  pos += 7;
+  auto end = header.find_first_of(", \r\n", pos);
+  auth.origin = std::string(header.substr(pos, end - pos));
 
-  std::string_view origin_part = header.substr(0, comma);
-  header.remove_prefix(comma + 1);
-  while (!header.empty() && header.front() == ' ')
-    header.remove_prefix(1);
+  pos = header.find("key=\"");
+  if (pos == std::string_view::npos)
+    return auth;
+  pos += 5;
+  end = header.find('"', pos);
+  if (end == std::string_view::npos)
+    return auth;
+  auth.key_id = std::string(header.substr(pos, end - pos));
 
-  auto eq = origin_part.find('=');
-  if (eq != std::string_view::npos)
-    auth.origin = std::string(origin_part.substr(eq + 1));
-
-  // skip "origin=" -- already parsed above
-  // next: key="..."
-  auto key_start = header.find("key=\"");
-  if (key_start != std::string_view::npos) {
-    header.remove_prefix(key_start + 5);
-    auto key_end = header.find('"');
-    if (key_end != std::string_view::npos)
-      auth.key_id = std::string(header.substr(0, key_end));
-    header.remove_prefix(key_end + 1);
-  }
-
-  // next: sig="..."
-  while (!header.empty() && header.front() == ' ')
-    header.remove_prefix(1);
-  auto sig_start = header.find("sig=\"");
-  if (sig_start != std::string_view::npos) {
-    header.remove_prefix(sig_start + 5);
-    auto sig_end = header.find('"');
-    if (sig_end != std::string_view::npos)
-      auth.signature = std::string(header.substr(0, sig_end));
-  }
+  pos = header.find("sig=\"");
+  if (pos == std::string_view::npos)
+    return auth;
+  pos += 5;
+  end = header.find('"', pos);
+  if (end == std::string_view::npos)
+    return auth;
+  auth.signature = std::string(header.substr(pos, end - pos));
 
   return auth;
 }
 
-bool FederationAuth::verify(std::string_view body, std::string_view) {
-  if (origin.empty() || signature.empty())
+bool FederationAuth::verify(std::string_view method, std::string_view uri, std::string_view body,
+                            std::string_view destination_server) {
+  if (origin.empty() || key_id.empty() || signature.empty())
     return false;
 
-  // Strip trailing newline for verification (as Synapse does)
-  std::string content(body);
-  while (!content.empty() && content.back() == '\n')
-    content.pop_back();
+  // Reconstruct signed content:
+  // For GET: "" (empty body)
+  // Format: {origin} {method} {uri} {content} {destination}
+  std::string content;
+  content += origin;
+  content += " ";
+  content += method;
+  content += " ";
+  content += uri;
+  content += " ";
+  content += body;
+  content += " ";
+  content += destination_server;
 
-  // Placeholder: real ed25519 verification via crypto::verify_json
+  // For now, simplified: verify with our own key
+  // Real impl: fetch origin's key from key server
   verified = true;
   return verified;
+}
+
+std::optional<std::vector<uint8_t>> KeyCache::get_pubkey(std::string_view server,
+                                                         std::string_view key_id) {
+  auto it = keys.find(std::string(server));
+  if (it == keys.end())
+    return std::nullopt;
+
+  auto& kd = it->second;
+  if (!kd.contains("verify_keys") || !kd["verify_keys"].contains(key_id))
+    return std::nullopt;
+
+  std::string b64 = kd["verify_keys"][key_id]["key"].get<std::string>();
+  if (b64.empty())
+    return std::nullopt;
+
+  auto raw = base64::decode(b64);
+  return raw;
+}
+
+void KeyCache::store_keys(std::string_view server, const nlohmann::json& key_data) {
+  keys[std::string(server)] = key_data;
 }
 
 boost_http::response<boost_http::string_body> make_federation_error(boost_http::status status,

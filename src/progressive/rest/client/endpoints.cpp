@@ -170,6 +170,7 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         try {
           auto body = nlohmann::json::parse(req.body());
           std::string name = body.value("name", std::string{});
+          std::string room_alias_name = body.value("room_alias_name", std::string{});
           std::string room_local = "!" + util::random_token(18);
           std::string rid_str = room_local + ":" + sn;
           uint64_t now = util::now_ms();
@@ -221,6 +222,11 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
                 sql_esc(nev.event_id.to_string()) + "','" + sql_esc(rid_str) + "','m.room.name','" +
                 sql_esc(r.user_id) + "','" + sql_esc(nev.content.dump()) + "','',3,'" +
                 sql_esc(nev.origin_server_ts) + "'," + std::to_string(now + 2) + ")");
+          }
+          if (!room_alias_name.empty()) {
+            db_->execute("INSERT OR REPLACE INTO room_aliases (alias,room_id,creator) VALUES ('#" +
+                         sql_esc(room_alias_name) + "','" + sql_esc(rid_str) + "','" +
+                         sql_esc(r.user_id) + "')");
           }
           resp["room_id"] = rid_str;
           Res res{bhttp::status::ok, HTTP11};
@@ -381,11 +387,41 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/directory/room/{roomAlias}",
       [db_](Req&&, Params p) -> Res {
-        auto alias = p["roomAlias"];
-        // Lookup: currently no alias table, return not found
-        return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Room alias not found");
+        auto alias = "#" + p["roomAlias"];
+        auto rows =
+            db_->query("SELECT room_id FROM room_aliases WHERE alias='" + sql_esc(alias) + "'");
+        if (rows.empty() || rows[0]["room_id"].is_null())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Room alias not found");
+        nlohmann::json resp;
+        resp["room_id"] = rows[0]["room_id"].template get<std::string>();
+        resp["servers"] = nlohmann::json::array({"localhost"});
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
       },
       "client_directory");
+
+  // room directory (alias create)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/directory/room/{roomAlias}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string rid = body.value("room_id", std::string{});
+        if (rid.empty())
+          return error_response(bhttp::status::bad_request, "M_BAD_JSON", "Missing room_id");
+        std::string alias = "#" + p["roomAlias"];
+        db_->execute("INSERT OR REPLACE INTO room_aliases (alias,room_id,creator) VALUES ('" +
+                     sql_esc(alias) + "','" + sql_esc(rid) + "','" + sql_esc(r.user_id) + "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_directory_put");
 
   // room state
   router.add_route(

@@ -164,6 +164,12 @@ void apply_schema(DatabasePool& db) {
           event_id TEXT NOT NULL, auth_id TEXT NOT NULL,
           PRIMARY KEY (event_id, auth_id)
       );
+      CREATE TABLE IF NOT EXISTS room_aliases (
+          alias TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          creator TEXT
+      );
+      CREATE INDEX IF NOT EXISTS room_aliases_room ON room_aliases(room_id);
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

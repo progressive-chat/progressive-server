@@ -102,3 +102,11 @@ CREATE TABLE IF NOT EXISTS push_rules (
 );
 
 CREATE INDEX IF NOT EXISTS push_rules_user ON push_rules(user_id);
+
+CREATE TABLE IF NOT EXISTS room_aliases (
+    alias TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    creator TEXT
+);
+
+CREATE INDEX IF NOT EXISTS room_aliases_room ON room_aliases(room_id);

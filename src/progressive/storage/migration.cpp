@@ -373,6 +373,18 @@ void apply_schema(DatabasePool& db) {
       CREATE TABLE IF NOT EXISTS appservice_txns (
           as_id TEXT PRIMARY KEY, txn_id TEXT NOT NULL, sent_ts BIGINT
       );
+      CREATE TABLE IF NOT EXISTS delayed_events (
+          delay_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
+          event_type TEXT NOT NULL, sender TEXT, content TEXT,
+          send_at BIGINT NOT NULL, sent INTEGER DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS user_directory (
+          user_id TEXT PRIMARY KEY, display_name TEXT,
+          updated_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS received_transactions (
+          transaction_id TEXT PRIMARY KEY, origin TEXT, received_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

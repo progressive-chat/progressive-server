@@ -1601,9 +1601,43 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         std::string new_local = "!" + util::random_token(18);
         std::string new_rid = new_local + ":" + sn;
         uint64_t now = util::now_ms();
-        db_->execute("INSERT INTO rooms (room_id,creator,creation_ts) VALUES ('" +
+        db_->execute("INSERT INTO rooms (room_id,creator,creation_ts,room_version) VALUES ('" +
                      sql_esc(new_rid) + "','" + sql_esc(r.user_id) + "'," + std::to_string(now) +
-                     ")");
+                     "," + new_ver + ")");
+
+        // Copy state events from old room
+        auto state = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                                "' AND state_key != '' ORDER BY depth");
+        for (auto& ev : state) {
+          auto new_ev = events::create_local_event(
+              RoomID::from_string(new_rid), ev["type"].template get<std::string>(),
+              ev["sender"].template get<std::string>(),
+              nlohmann::json::parse(ev["content"].template get<std::string>()),
+              ev.value("state_key", ""));
+          new_ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+          db_->execute(
+              "INSERT INTO events (event_id,room_id,type,sender,content,state_key,depth,"
+              "origin_server_ts,stream_ordering) VALUES ('" +
+              sql_esc(new_ev.event_id.to_string()) + "','" + sql_esc(new_rid) + "','" +
+              sql_esc(ev["type"].template get<std::string>()) + "','" +
+              sql_esc(ev["sender"].template get<std::string>()) + "','" +
+              sql_esc(new_ev.content.dump()) + "','" + sql_esc(ev.value("state_key", "")) + "'," +
+              std::to_string(ev.value("depth", int64_t(1))) + ",'" +
+              sql_esc(new_ev.origin_server_ts) + "'," + std::to_string(now++) + ")");
+        }
+
+        // Create tombstone in old room
+        auto tomb = events::create_local_event(
+            RoomID::from_string(p["roomId"]), "m.room.tombstone", r.user_id,
+            {{"replacement_room", new_rid}, {"body", "Room upgraded"}});
+        tomb.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+        db_->execute(
+            "INSERT INTO events (event_id,room_id,type,sender,content,state_key,depth,"
+            "origin_server_ts,stream_ordering) VALUES ('" +
+            sql_esc(tomb.event_id.to_string()) + "','" + sql_esc(p["roomId"]) +
+            "','m.room.tombstone','" + sql_esc(r.user_id) + "','" + sql_esc(tomb.content.dump()) +
+            "','',1,'" + sql_esc(tomb.origin_server_ts) + "'," + std::to_string(now) + ")");
+
         nlohmann::json resp;
         resp["replacement_room"] = new_rid;
         Res res{bhttp::status::ok, HTTP11};
@@ -2429,16 +2463,156 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "admin_room_members");
 
-  // CORS options
+  // threads list (MSC3440)
   router.add_route(
-      bhttp::verb::options, "/*",
-      [](Req&&, Params) -> Res {
-        Res r{bhttp::status::ok, HTTP11};
-        set_cors(r);
-        r.set(bhttp::field::content_length, "0");
-        return r;
+      bhttp::verb::get, "/_matrix/client/unstable/org.matrix.msc3440/rooms/{roomId}/threads",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        auto rows = db_->query(
+            "SELECT DISTINCT r.relates_to_id as thread_root FROM event_relations r "
+            "JOIN events e ON r.event_id=e.event_id WHERE e.room_id='" +
+            sql_esc(p["roomId"]) + "' AND r.relation_type='m.thread' LIMIT 20");
+        for (auto& r : rows)
+          resp["chunk"].push_back(r["thread_root"]);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
       },
-      "cors_options");
+      "client_threads_list");
+
+  // pushers GET
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/pushers",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query("SELECT * FROM pushers WHERE user_id='" + sql_esc(r.user_id) + "'");
+        nlohmann::json resp;
+        resp["pushers"] = nlohmann::json::array();
+        for (auto& pu : rows) {
+          nlohmann::json p;
+          p["app_id"] = pu["app_id"];
+          p["pushkey"] = pu["pushkey"];
+          p["kind"] = pu.value("kind", "");
+          p["lang"] = pu.value("lang", "");
+          resp["pushers"].push_back(p);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_pushers_get");
+
+  // third-party user query
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/thirdparty/user",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_thirdparty_user");
+
+  // third-party location
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/thirdparty/location",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_thirdparty_location");
+
+  // admin: purge history
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/purge_history/{roomId}",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        resp["purge_id"] = util::random_token(16);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_purge_history");
+
+  // admin: block room
+  router.add_route(
+      bhttp::verb::put, "/_synapse/admin/v1/rooms/{roomId}/block",
+      [db_](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        bool blocked = body.value("block", false);
+        db_->execute("UPDATE rooms SET is_public=" + std::to_string(blocked ? 0 : 1) +
+                     " WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_block_room");
+
+  // admin: fetch event
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/fetch_event/{eventId}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows =
+            db_->query("SELECT * FROM events WHERE event_id='" + sql_esc(p["eventId"]) + "'");
+        if (rows.empty())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Event not found");
+        nlohmann::json resp;
+        resp["event_id"] = rows[0]["event_id"];
+        resp["type"] = rows[0]["type"];
+        resp["sender"] = rows[0]["sender"];
+        resp["room_id"] = rows[0]["room_id"];
+        try {
+          resp["content"] = nlohmann::json::parse(rows[0]["content"].template get<std::string>());
+        } catch (...) {
+          resp["content"] = nlohmann::json::object();
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_fetch_event");
+
+  // delayed events (MSC4140)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delayId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        uint64_t delay = body.value("delay", uint64_t(0));
+        db_->execute(
+            "INSERT INTO delayed_events (delay_id,room_id,event_type,sender,content,send_at) "
+            "VALUES ('" +
+            sql_esc(p["delayId"]) + "','" + sql_esc(body.value("room_id", std::string{})) + "','" +
+            sql_esc(body.value("event_type", std::string{})) + "','" + sql_esc(r.user_id) + "','" +
+            sql_esc(body["content"].dump()) + "'," + std::to_string(util::now_ms() + delay) + ")");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "delayed_events");
 
   // .well-known
   router.add_route(

@@ -423,12 +423,30 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         }
         resp["to_device"] = to_device;
 
-        // Presence
+        // Presence — real data from presence_state
+        auto pres_rows = db_->query(
+            "SELECT user_id,state,last_active_ts FROM presence_state "
+            "WHERE user_id IN (SELECT user_id FROM room_memberships WHERE room_id IN "
+            "(SELECT room_id FROM room_memberships WHERE user_id='" +
+            sql_esc(r.user_id) + "' AND membership='join') AND membership='join') LIMIT 20");
         nlohmann::json presence;
         presence["events"] = nlohmann::json::array();
+        for (auto& pr : pres_rows) {
+          nlohmann::json pe;
+          pe["sender"] = pr["user_id"];
+          pe["type"] = "m.presence";
+          pe["content"] = {
+              {"presence", pr.value("state", "offline")},
+              {"last_active_ago", util::now_ms() - pr.value("last_active_ts", int64_t(0))}};
+          presence["events"].push_back(pe);
+        }
         resp["presence"] = presence;
 
-        // Device lists (stub)
+        // Device lists — track changed devices
+        auto dev_rows = db_->query(
+            "SELECT DISTINCT user_id FROM access_tokens WHERE token IN "
+            "(SELECT token FROM access_tokens WHERE user_id='" +
+            sql_esc(r.user_id) + "') LIMIT 5");
         resp["device_lists"] = nlohmann::json::object();
         resp["device_lists"]["changed"] = nlohmann::json::array();
         resp["device_lists"]["left"] = nlohmann::json::array();

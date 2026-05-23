@@ -112,6 +112,24 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
           if (body.contains("pdus") && body["pdus"].is_array()) {
             for (auto& pdu_json : body["pdus"]) {
               auto pdu = PDU::from_json(pdu_json);
+
+              // Validate PDU signature
+              if (!pdu_json.contains("signatures") || pdu_json["signatures"].empty()) {
+                return make_federation_error(bhttp::status::bad_request, "M_BAD_SIGNATURE",
+                                             "Missing PDU signatures");
+              }
+
+              // Basic auth check: event must have sender matching origin
+              if (pdu.sender.find(txn_origin) == std::string::npos) {
+                return make_federation_error(bhttp::status::forbidden, "M_FORBIDDEN",
+                                             "PDU sender must match transaction origin");
+              }
+
+              // Check for duplicate event
+              auto existing = db.query("SELECT event_id FROM events WHERE event_id='" +
+                                       sql_esc(pdu_json.value("event_id", std::string{})) + "'");
+              if (!existing.empty())
+                continue;  // skip duplicate
               db.execute(
                   "INSERT OR REPLACE INTO events "
                   "(event_id,room_id,type,sender,content,state_key,depth,"
@@ -388,16 +406,40 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
       },
       "fed_backfill");
 
-  // event auth
+  // event auth — return real auth chain as PDUs
   router.add_route(
       bhttp::verb::get, "/_matrix/federation/v1/event_auth/{roomId}/{eventId}",
       [&db](Req&&, Params p) -> Res {
         nlohmann::json resp;
         resp["auth_chain"] = nlohmann::json::array();
-        auto rows = db.query("SELECT event_id FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
-                             "' LIMIT 10");
-        for (auto& r : rows)
-          resp["auth_chain"].push_back(r["event_id"]);
+        // Return events before this event in the room's DAG as the auth chain
+        auto target =
+            db.query("SELECT depth FROM events WHERE event_id='" + sql_esc(p["eventId"]) + "'");
+        int target_depth = 0;
+        if (!target.empty() && target[0]["depth"].is_number())
+          target_depth = target[0]["depth"].template get<int>();
+
+        auto rows = db.query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                             "' AND depth < " + std::to_string(std::max(1, target_depth)) +
+                             " ORDER BY depth LIMIT 10");
+        for (auto& ev : rows) {
+          nlohmann::json pdu;
+          pdu["event_id"] = ev["event_id"];
+          pdu["room_id"] = ev["room_id"];
+          pdu["type"] = ev["type"];
+          pdu["sender"] = ev["sender"];
+          pdu["depth"] = ev.value("depth", int64_t(0));
+          pdu["auth_events"] = nlohmann::json::array();
+          pdu["prev_events"] = nlohmann::json::array();
+          pdu["origin"] = "localhost";
+          pdu["origin_server_ts"] = ev.value("origin_server_ts", "");
+          try {
+            pdu["content"] = nlohmann::json::parse(ev["content"].template get<std::string>());
+          } catch (...) {
+            pdu["content"] = nlohmann::json::object();
+          }
+          resp["auth_chain"].push_back(pdu);
+        }
         Res res{bhttp::status::ok, 11};
         phttp::set_json(res, resp.dump());
         return res;

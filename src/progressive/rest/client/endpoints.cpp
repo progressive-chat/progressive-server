@@ -1252,6 +1252,19 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "well_known_server");
 
+  // health check
+  router.add_route(
+      bhttp::verb::get, "/health",
+      [](Req&&, Params) -> Res {
+        nlohmann::json j;
+        j["status"] = "ok";
+        j["version"] = "0.1.0";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, j.dump());
+        return res;
+      },
+      "health");
+
   // third party networks
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/thirdparty/protocols",

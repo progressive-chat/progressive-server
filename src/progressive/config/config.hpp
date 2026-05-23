@@ -28,6 +28,8 @@ struct DatabaseConfigSection {
   struct Database {
     std::string name = "psycopg2";
     std::map<std::string, std::string> args;
+
+    std::string connection_string() const;
   };
   std::vector<Database> databases;
 };

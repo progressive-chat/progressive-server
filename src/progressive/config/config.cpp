@@ -7,6 +7,17 @@
 
 namespace progressive::config {
 
+std::string DatabaseConfigSection::Database::connection_string() const {
+  if (name == "sqlite3" || name == "sqlite")
+    return "sqlite://" + (args.contains("database") ? args.at("database") : "progressive.db");
+  if (name.starts_with("psycopg") || name.starts_with("post"))
+    return "postgresql://" + (args.contains("user") ? args.at("user") : "progressive") + ":" +
+           (args.contains("password") ? args.at("password") : "progressive") + "@" +
+           (args.contains("host") ? args.at("host") : "localhost") + "/" +
+           (args.contains("database") ? args.at("database") : "progressive");
+  return "";
+}
+
 Config Config::load(std::string_view path) {
   nlohmann::json j = load_config_file(path);
   Config cfg;

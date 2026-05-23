@@ -744,29 +744,34 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
                   sql_esc(rel_type) + "','" + sql_esc(agg_key) + "')");
           }
 
-          // Evaluate push rules and store notification actions
-          push::PushRuleEvaluator evaluator(ev.content);
+          // Evaluate push rules for ALL room members (bulk evaluation)
+          auto room_members = db_->query("SELECT user_id FROM room_memberships WHERE room_id='" +
+                                         sql_esc(p["roomId"]) + "' AND membership='join'");
           auto& rules = push::all_base_rules();
-          auto actions = evaluator.run(rules, r.user_id, std::nullopt);
-          if (!actions.empty()) {
-            auto acts_json = push::actions_to_json(actions);
-            db_->execute(
-                "INSERT OR REPLACE INTO event_push_actions "
-                "(event_id,user_id,room_id,actions,stream_ordering) VALUES ('" +
-                sql_esc(ev.event_id.to_string()) + "','" + sql_esc(r.user_id) + "','" +
-                sql_esc(p["roomId"]) + "','" + sql_esc(acts_json.dump()) + "'," +
-                std::to_string(now) + ")");
 
-            // Update room notification counts
-            bool has_highlight = acts_json.dump().find("highlight") != std::string::npos;
-            db_->execute(
-                "INSERT INTO event_push_summary (user_id,room_id,notif_count,highlight_count,"
-                "stream_ordering) VALUES ('" +
-                sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "',1," +
-                (has_highlight ? "1" : "0") + "," + std::to_string(now) +
-                ") ON CONFLICT(user_id,room_id) DO UPDATE SET "
-                "notif_count=notif_count+1,highlight_count=highlight_count+" +
-                (has_highlight ? "1" : "0") + ",stream_ordering=" + std::to_string(now));
+          for (auto& member : room_members) {
+            std::string uid = member["user_id"].template get<std::string>();
+            push::PushRuleEvaluator evaluator(ev.content);
+            auto actions = evaluator.run(rules, uid, std::nullopt);
+            if (!actions.empty()) {
+              auto acts_json = push::actions_to_json(actions);
+              db_->execute(
+                  "INSERT OR REPLACE INTO event_push_actions "
+                  "(event_id,user_id,room_id,actions,stream_ordering) VALUES ('" +
+                  sql_esc(ev.event_id.to_string()) + "','" + sql_esc(uid) + "','" +
+                  sql_esc(p["roomId"]) + "','" + sql_esc(acts_json.dump()) + "'," +
+                  std::to_string(now) + ")");
+
+              bool has_highlight = acts_json.dump().find("highlight") != std::string::npos;
+              db_->execute(
+                  "INSERT INTO event_push_summary (user_id,room_id,notif_count,highlight_count,"
+                  "stream_ordering) VALUES ('" +
+                  sql_esc(uid) + "','" + sql_esc(p["roomId"]) + "',1," +
+                  (has_highlight ? "1" : "0") + "," + std::to_string(now) +
+                  ") ON CONFLICT(user_id,room_id) DO UPDATE SET "
+                  "notif_count=notif_count+1,highlight_count=highlight_count+" +
+                  (has_highlight ? "1" : "0") + ",stream_ordering=" + std::to_string(now));
+            }
           }
 
           nlohmann::json resp;
@@ -1537,8 +1542,9 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           if (!term.empty()) {
             // Full-text search over content column
             auto rows = db_->query(
-                "SELECT event_id,room_id,type,sender,content,origin_server_ts FROM events "
-                "WHERE content LIKE '%" +
+                "SELECT s.event_id,s.room_id,e.type,e.sender,e.content,e.origin_server_ts "
+                "FROM event_search s JOIN events e ON s.event_id=e.event_id "
+                "WHERE s.body LIKE '%" +
                 term + "%' LIMIT 20");
             for (auto& ev : rows) {
               if (ev["event_id"].is_null())

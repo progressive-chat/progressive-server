@@ -192,8 +192,11 @@ TEST(StateResolutionV2, ThreeWayConflict) {
   StateMap s3 = {{make_key("m.room.topic", ""), "$t3"}};
   EventMap em;
   em["$t1"] = make_event("$t1", "m.room.topic", "", "@a", 1, 100);
+  em["$t1"].auth_event_ids = {};
   em["$t2"] = make_event("$t2", "m.room.topic", "", "@a", 2, 200);
+  em["$t2"].auth_event_ids = {};
   em["$t3"] = make_event("$t3", "m.room.topic", "", "@a", 3, 300);
+  em["$t3"].auth_event_ids = {};
   auto v = get_room_version("10");
   auto resolved = resolve_events(v, {s1, s2, s3}, em);
   EXPECT_EQ(resolved[make_key("m.room.topic", "")], "$t3");
@@ -228,8 +231,10 @@ TEST(StateResolutionV2, PowerEventTiebreak) {
   EventMap em;
   em["$pl1"] = make_event("$pl1", "m.room.power_levels", "", "@a", 1, 100);
   em["$pl1"].power_level = 100;
+  em["$pl1"].auth_event_ids = {};
   em["$pl2"] = make_event("$pl2", "m.room.power_levels", "", "@a", 1, 200);
   em["$pl2"].power_level = 100;
+  em["$pl2"].auth_event_ids = {};
   auto v = get_room_version("10");
   auto resolved = resolve_events(v, {s1, s2}, em);
   auto pl_key = make_key("m.room.power_levels", "");

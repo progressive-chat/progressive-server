@@ -518,6 +518,20 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           if (!check.allowed)
             return error_response(bhttp::status::forbidden, check.errcode, check.error);
           auto body = nlohmann::json::parse(req.body());
+
+          // Event dedup: check txn_id
+          auto dup = db_->query("SELECT event_id FROM event_txn_id WHERE room_id='" +
+                                sql_esc(p["roomId"]) + "' AND user_id='" + sql_esc(r.user_id) +
+                                "' AND txn_id='" + sql_esc(p["txnId"]) + "'");
+          if (!dup.empty() && !dup[0]["event_id"].is_null()) {
+            nlohmann::json resp;
+            resp["event_id"] = dup[0]["event_id"].template get<std::string>();
+            Res res{bhttp::status::ok, HTTP11};
+            set_json(res, resp.dump());
+            set_cors(res);
+            return res;
+          }
+
           auto rid = RoomID::from_string(p["roomId"]);
           auto ev = events::create_local_event(rid, p["eventType"], r.user_id, body);
           ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
@@ -530,6 +544,12 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               sql_esc(p["eventType"]) + "','" + sql_esc(r.user_id) + "','" +
               sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
               std::to_string(now) + ")");
+
+          // Track txn_id for dedup
+          db_->execute(
+              "INSERT OR IGNORE INTO event_txn_id (event_id,room_id,user_id,txn_id,ts) VALUES ('" +
+              sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+              sql_esc(r.user_id) + "','" + sql_esc(p["txnId"]) + "'," + std::to_string(now) + ")");
 
           // Forward extremities: remove prevs, add new event
           db_->execute("DELETE FROM event_forward_extremities WHERE room_id='" +
@@ -1826,10 +1846,20 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
   // presence
   router.add_route(
       bhttp::verb::put, "/_matrix/client/v3/presence/{userId}/status",
-      [auth_](Req&& req, Params p) -> Res {
+      [auth_, db_](Req&& req, Params p) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        std::string presence = body.value("presence", std::string{"online"});
+        std::string msg = body.value("status_msg", std::string{});
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT OR REPLACE INTO presence_state "
+            "(user_id,state,status_msg,last_active_ts,last_federation_update_ts) "
+            "VALUES ('" +
+            sql_esc(p["userId"]) + "','" + sql_esc(presence) + "','" + sql_esc(msg) + "'," +
+            std::to_string(now) + "," + std::to_string(now) + ")");
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, "{}");
         set_cors(res);
@@ -1839,13 +1869,22 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
 
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/presence/{userId}/status",
-      [auth_](Req&& req, Params) -> Res {
+      [auth_, db_](Req&& req, Params p) -> Res {
         auto r = check_auth(*auth_, req);
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query(
+            "SELECT state,status_msg,last_active_ts FROM presence_state WHERE user_id='" +
+            sql_esc(p["userId"]) + "'");
         nlohmann::json resp;
-        resp["presence"] = "offline";
-        resp["last_active_ago"] = 3600000;
+        if (rows.empty()) {
+          resp["presence"] = "offline";
+          resp["last_active_ago"] = 3600000;
+        } else {
+          resp["presence"] = rows[0].value("state", "offline");
+          int64_t ago = util::now_ms() - rows[0].value("last_active_ts", int64_t(0));
+          resp["last_active_ago"] = ago > 0 ? ago : 0;
+        }
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);

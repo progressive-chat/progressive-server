@@ -237,11 +237,41 @@ void apply_schema(DatabasePool& db) {
           PRIMARY KEY (user_id, room_id)
       );
       CREATE TABLE IF NOT EXISTS ui_auth_sessions (
-          session_id TEXT PRIMARY KEY,
-          user_id TEXT,
-          client_secret TEXT,
-          server_data TEXT,
-          creation_ts BIGINT
+          session_id TEXT PRIMARY KEY, user_id TEXT,
+          client_secret TEXT, server_data TEXT, creation_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS presence_state (
+          user_id TEXT PRIMARY KEY,
+          state TEXT DEFAULT 'offline',
+          status_msg TEXT,
+          last_active_ts BIGINT,
+          last_federation_update_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS event_txn_id (
+          event_id TEXT PRIMARY KEY,
+          room_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          txn_id TEXT NOT NULL,
+          ts BIGINT,
+          UNIQUE(room_id, user_id, txn_id)
+      );
+      CREATE TABLE IF NOT EXISTS server_acl (
+          room_id TEXT PRIMARY KEY,
+          allow_ip_literals INTEGER DEFAULT 0,
+          allowed_servers TEXT,
+          denied_servers TEXT
+      );
+      CREATE TABLE IF NOT EXISTS timeline_gaps (
+          room_id TEXT NOT NULL,
+          gap_start TEXT NOT NULL,
+          gap_end TEXT NOT NULL,
+          PRIMARY KEY (room_id, gap_start)
+      );
+      CREATE TABLE IF NOT EXISTS user_filters (
+          user_id TEXT NOT NULL,
+          filter_id INTEGER NOT NULL,
+          filter_json TEXT NOT NULL,
+          PRIMARY KEY (user_id, filter_id)
       );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");

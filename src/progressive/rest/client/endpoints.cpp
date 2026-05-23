@@ -3,6 +3,7 @@
 #include <atomic>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <thread>
 
 #include "../../auth/event_auth.hpp"
 #include "../../events/event_factory.hpp"
@@ -470,6 +471,17 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         acct_data["events"] = nlohmann::json::array();
         resp["account_data"] = acct_data;
 
+        // Room summary (per-room joined/invited counts)
+        nlohmann::json summary;
+        summary["joined_member_count"] = 0;
+        summary["invited_member_count"] = 0;
+        resp["summary"] = summary;
+
+        // Ephemeral events (typing + receipts) — basic stubs
+        resp["ephemeral"] = nlohmann::json::object();
+        resp["ephemeral"]["typing"] = nlohmann::json::object();
+        resp["ephemeral"]["receipts"] = nlohmann::json::array();
+
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, resp.dump());
         set_cors(res);
@@ -677,6 +689,20 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         if (!r.success)
           return error_response(bhttp::status::unauthorized, r.errcode, r.error);
         try {
+          // Shadow ban check
+          auto sb =
+              db_->query("SELECT deactivated FROM users WHERE id='" + sql_esc(r.user_id) + "'");
+          if (!sb.empty() && sb[0].value("deactivated", 0) >= 2) {
+            // Shadow-banned: silently reject after random delay
+            int delay = 1000 + (util::now_ms() % 9000);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            return error_response(bhttp::status::forbidden, "M_FORBIDDEN", "");
+          }
+
+          // Event size limit (64KB)
+          if (req.body().size() > 65536)
+            return error_response(bhttp::status::bad_request, "M_TOO_LARGE", "Event too large");
+
           auth::EventAuthorizer authz(*db_);
           auto check = authz.can_send_event(p["roomId"], r.user_id, p["eventType"], false);
           if (!check.allowed)

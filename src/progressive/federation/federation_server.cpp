@@ -281,9 +281,32 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
             }
           }
 
-          // Return auth chain (simplified: empty)
+          // Return auth chain + state
           nlohmann::json resp;
           resp["auth_chain"] = nlohmann::json::array();
+          // Auth chain: depth-sorted events before the join event
+          auto auth_rows = db.query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                                    "' AND depth < 10 ORDER BY depth LIMIT 10");
+          for (auto& ar : auth_rows) {
+            nlohmann::json ae;
+            ae["event_id"] = ar["event_id"];
+            ae["type"] = ar["type"];
+            ae["sender"] = ar["sender"];
+            ae["room_id"] = ar["room_id"];
+            ae["depth"] = ar.value("depth", int64_t(0));
+            ae["auth_events"] = nlohmann::json::array();
+            ae["prev_events"] = nlohmann::json::array();
+            ae["origin"] = "localhost";
+            ae["origin_server_ts"] = ar.value("origin_server_ts", "");
+            try {
+              ae["content"] = nlohmann::json::parse(ar["content"].template get<std::string>());
+            } catch (...) {
+              ae["content"] = nlohmann::json::object();
+            }
+            if (!ar["state_key"].is_null())
+              ae["state_key"] = ar["state_key"];
+            resp["auth_chain"].push_back(ae);
+          }
           resp["state"] = nlohmann::json::array();
 
           // Get room state

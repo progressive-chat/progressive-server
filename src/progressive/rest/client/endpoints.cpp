@@ -1727,6 +1727,59 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_password");
 
+  // email password reset request
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/account/password/email/requestToken",
+      [](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        nlohmann::json resp;
+        resp["sid"] = util::random_token(16);
+        resp["submit_url"] = "";
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_password_email");
+
+  // email registration request token
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/register/email/requestToken",
+      [](Req&& req, Params) -> Res {
+        nlohmann::json resp;
+        resp["sid"] = util::random_token(16);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_reg_email_req");
+
+  // push gateway HTTP sender (stub — real push via APNs/FCM)
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/pushers/set",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute(
+            "INSERT OR REPLACE INTO pushers "
+            "(user_id,app_id,pushkey,kind,app_display_name,lang,data) "
+            "VALUES ('" +
+            sql_esc(r.user_id) + "','" + sql_esc(body.value("app_id", std::string{})) + "','" +
+            sql_esc(body.value("pushkey", std::string{})) + "','" +
+            sql_esc(body.value("kind", std::string{})) + "','" +
+            sql_esc(body.value("app_display_name", std::string{})) + "','" +
+            sql_esc(body.value("lang", std::string{})) + "','" + sql_esc(body["data"].dump()) +
+            "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_pusher_set");
+
   // deactivate account
   router.add_route(
       bhttp::verb::post, "/_matrix/client/v3/account/deactivate",
@@ -1926,6 +1979,8 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         if (t.starts_with("Bearer "))
           t.remove_prefix(7);
         db_->execute("DELETE FROM access_tokens WHERE token='" + sql_esc(std::string(t)) + "'");
+        db_->execute("DELETE FROM refresh_tokens WHERE access_token_id='" +
+                     sql_esc(std::string(t)) + "'");
         Res res{bhttp::status::ok, HTTP11};
         set_json(res, "{}");
         set_cors(res);

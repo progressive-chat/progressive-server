@@ -1434,6 +1434,60 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_tags");
 
+  // room tag PUT
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute("INSERT OR REPLACE INTO room_tags (user_id,room_id,tag,content) VALUES ('" +
+                     sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(p["tag"]) +
+                     "','" + sql_esc(body.dump()) + "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_tag_put");
+
+  // room tag DELETE
+  router.add_route(
+      bhttp::verb::delete_, "/_matrix/client/v3/user/{userId}/rooms/{roomId}/tags/{tag}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM room_tags WHERE user_id='" + sql_esc(r.user_id) +
+                     "' AND room_id='" + sql_esc(p["roomId"]) + "' AND tag='" + sql_esc(p["tag"]) +
+                     "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_tag_delete");
+
+  // account data GET
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/user/{userId}/account_data/{type}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query("SELECT content FROM account_data WHERE user_id='" +
+                               sql_esc(r.user_id) + "' AND data_type='" + sql_esc(p["type"]) + "'");
+        nlohmann::json resp;
+        if (!rows.empty())
+          resp = nlohmann::json::parse(rows[0]["content"].template get<std::string>());
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_account_data_get");
+
   // account data
   router.add_route(
       bhttp::verb::put, "/_matrix/client/v3/user/{userId}/account_data/{type}",
@@ -1789,6 +1843,42 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return res;
       },
       "room_keys_get");
+
+  router.add_route(
+      bhttp::verb::delete_, "/_matrix/client/v3/room_keys/keys",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM e2e_room_keys WHERE user_id='" + sql_esc(r.user_id) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "room_keys_delete_all");
+
+  // registration token validity
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v1/register/m.login.registration_token/validity",
+      [db_](Req&& req, Params) -> Res {
+        auto tok = std::string(req.target());
+        auto p = tok.find("token=");
+        if (p != std::string::npos)
+          tok = tok.substr(p + 6);
+        auto ep = tok.find('&');
+        if (ep != std::string::npos)
+          tok = tok.substr(0, ep);
+        auto rows = db_->query("SELECT token,used FROM registration_tokens WHERE token='" +
+                               sql_esc(tok) + "'");
+        nlohmann::json resp;
+        resp["valid"] = !rows.empty() && rows[0].value("used", 0) == 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "reg_token_validity");
 
   // logout
   router.add_route(

@@ -352,10 +352,26 @@ void apply_schema(DatabasePool& db) {
           lang TEXT, data TEXT, last_token TEXT
       );
       CREATE TABLE IF NOT EXISTS event_reports (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          room_id TEXT NOT NULL, event_id TEXT NOT NULL,
-          user_id TEXT NOT NULL, score INTEGER DEFAULT 0,
+          id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL,
+          event_id TEXT NOT NULL, user_id TEXT NOT NULL, score INTEGER DEFAULT 0,
           reason TEXT, received_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS user_ips (
+          user_id TEXT NOT NULL, access_token TEXT NOT NULL,
+          ip TEXT NOT NULL, user_agent TEXT, last_seen BIGINT,
+          PRIMARY KEY (user_id, access_token, ip)
+      );
+      CREATE TABLE IF NOT EXISTS open_id_tokens (
+          token TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+          expires_at BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS room_tags (
+          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
+          tag TEXT NOT NULL, content TEXT,
+          PRIMARY KEY (user_id, room_id, tag)
+      );
+      CREATE TABLE IF NOT EXISTS appservice_txns (
+          as_id TEXT PRIMARY KEY, txn_id TEXT NOT NULL, sent_ts BIGINT
       );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");

@@ -393,6 +393,20 @@ void apply_schema(DatabasePool& db) {
           connection_id TEXT NOT NULL, room_id TEXT NOT NULL,
           PRIMARY KEY (connection_id, room_id)
       );
+      CREATE TABLE IF NOT EXISTS experimental_features (
+          user_id TEXT NOT NULL, feature TEXT NOT NULL,
+          enabled INTEGER DEFAULT 0,
+          PRIMARY KEY (user_id, feature)
+      );
+      CREATE TABLE IF NOT EXISTS threepid_tokens (
+          token TEXT PRIMARY KEY, medium TEXT NOT NULL,
+          address TEXT NOT NULL, client_secret TEXT NOT NULL,
+          valid_until_ms BIGINT, user_id TEXT
+      );
+      CREATE TABLE IF NOT EXISTS rendezvous_sessions (
+          session_id TEXT PRIMARY KEY, user_id TEXT,
+          data TEXT, created_ts BIGINT, expires_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

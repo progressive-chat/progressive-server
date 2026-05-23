@@ -2673,6 +2673,177 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "sliding_sync");
 
+  // login flows discovery
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/login",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["flows"] = nlohmann::json::array(
+            {{{"type", "m.login.password"}},
+             {{"type", "m.login.token"}},
+             {{"type", "m.login.sso", "identity_providers", nlohmann::json::array()}}});
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_login_flows");
+
+  // push rules CRUD
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/pushrules/{scope}/{kind}/{ruleId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "pushrules_put");
+
+  router.add_route(
+      bhttp::verb::delete_, "/_matrix/client/v3/pushrules/{scope}/{kind}/{ruleId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "pushrules_delete");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/pushrules/{scope}/{kind}/{ruleId}/enabled",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "pushrules_enabled");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/pushrules/{scope}/{kind}/{ruleId}/actions",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "pushrules_actions");
+
+  // server ACL PUT
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/state/m.room.server_acl",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute(
+            "INSERT OR REPLACE INTO server_acl "
+            "(room_id,allow_ip_literals,allowed_servers,denied_servers) "
+            "VALUES ('" +
+            sql_esc(p["roomId"]) + "'," + std::to_string(body.value("allow_ip_literals", 0)) +
+            ",'" + sql_esc(body.value("allow", nlohmann::json::array()).dump()) + "','" +
+            sql_esc(body.value("deny", nlohmann::json::array()).dump()) + "')");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "server_acl_put");
+
+  // MSC rendezvous (MSC3886/MSC4108)
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/org.matrix.msc4108/rendezvous",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string sid = util::random_token(16);
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT INTO rendezvous_sessions (session_id,user_id,data,created_ts,expires_ts) "
+            "VALUES ('" +
+            sid + "','" + sql_esc(r.user_id) + "','" + sql_esc(req.body()) + "'," +
+            std::to_string(now) + "," + std::to_string(now + 600000) + ")");
+        nlohmann::json resp;
+        resp["rendezvous"] = {{"session_id", sid}};
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "rendezvous");
+
+  // admin: federation destinations
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/federation/destinations",
+      [db_](Req&&, Params) -> Res {
+        auto rows = db_->query("SELECT * FROM destinations");
+        nlohmann::json resp;
+        resp["destinations"] = nlohmann::json::array();
+        for (auto& d : rows) {
+          nlohmann::json dest;
+          dest["destination"] = d["destination"];
+          dest["retry_interval"] = d.value("retry_interval", 0);
+          dest["retry_last_ts"] = d.value("retry_last_ts", 0);
+          resp["destinations"].push_back(dest);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_fed_destinations");
+
+  // admin: event report detail
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/event_reports/{reportId}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM event_reports WHERE id=" + sql_esc(p["reportId"]));
+        if (rows.empty())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "Report not found");
+        nlohmann::json resp;
+        resp["id"] = rows[0]["id"];
+        resp["room_id"] = rows[0]["room_id"];
+        resp["event_id"] = rows[0]["event_id"];
+        resp["user_id"] = rows[0]["user_id"];
+        resp["reason"] = rows[0].value("reason", "");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_event_report_detail");
+
+  // admin: room make_admin
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/rooms/{roomId}/make_room_admin",
+      [db_](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        if (!uid.empty())
+          db_->execute("UPDATE room_memberships SET membership='join' WHERE room_id='" +
+                       sql_esc(p["roomId"]) + "' AND user_id='" + sql_esc(uid) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_make_room_admin");
+
   // .well-known
   router.add_route(
       bhttp::verb::get, "/.well-known/matrix/client",

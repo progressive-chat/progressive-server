@@ -93,7 +93,37 @@ void register_routes(progressive::http::Router& router, auth::Auth& auth_unit,
         in.read(content.data(), size);
 
         bhttp::response<bhttp::string_body> res{bhttp::status::ok, 11};
-        res.set(bhttp::field::content_type, "application/octet-stream");
+        // Content-type detection by extension
+        std::string ct = "application/octet-stream";
+        auto dot = p["mediaId"].rfind('.');
+        if (dot != std::string::npos) {
+          std::string ext = p["mediaId"].substr(dot + 1);
+          if (ext == "png")
+            ct = "image/png";
+          else if (ext == "jpg" || ext == "jpeg")
+            ct = "image/jpeg";
+          else if (ext == "gif")
+            ct = "image/gif";
+          else if (ext == "webp")
+            ct = "image/webp";
+          else if (ext == "mp4")
+            ct = "video/mp4";
+          else if (ext == "webm")
+            ct = "video/webm";
+          else if (ext == "mp3")
+            ct = "audio/mpeg";
+          else if (ext == "ogg")
+            ct = "audio/ogg";
+          else if (ext == "pdf")
+            ct = "application/pdf";
+          else if (ext == "json")
+            ct = "application/json";
+          else if (ext == "txt")
+            ct = "text/plain";
+          else if (ext == "html")
+            ct = "text/html";
+        }
+        res.set(bhttp::field::content_type, ct);
         res.body() = std::move(content);
         res.prepare_payload();
         return res;

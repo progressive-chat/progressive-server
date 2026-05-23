@@ -292,6 +292,45 @@ void apply_schema(DatabasePool& db) {
           thread_id TEXT NOT NULL, subscribed INTEGER DEFAULT 1,
           PRIMARY KEY (user_id, room_id, thread_id)
       );
+      CREATE TABLE IF NOT EXISTS event_auth_chains (
+          event_id TEXT PRIMARY KEY,
+          chain_id BIGINT NOT NULL,
+          sequence_number BIGINT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS event_auth_chains_cid ON event_auth_chains(chain_id);
+      CREATE TABLE IF NOT EXISTS event_auth_chain_links (
+          origin_chain_id BIGINT NOT NULL,
+          origin_seq BIGINT NOT NULL,
+          target_chain_id BIGINT NOT NULL,
+          target_seq BIGINT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS partial_state_rooms (
+          room_id TEXT PRIMARY KEY,
+          joined_via TEXT,
+          creation_ts BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          access_token_id TEXT,
+          next_token_id TEXT,
+          expires_at BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS room_retention (
+          room_id TEXT PRIMARY KEY,
+          max_lifetime BIGINT, min_lifetime BIGINT
+      );
+      CREATE TABLE IF NOT EXISTS background_updates (
+          update_name TEXT PRIMARY KEY,
+          progress_json TEXT NOT NULL DEFAULT '{}',
+          depends_on TEXT
+      );
+      CREATE TABLE IF NOT EXISTS scheduled_tasks (
+          task_id TEXT PRIMARY KEY,
+          action TEXT NOT NULL,
+          status TEXT DEFAULT 'scheduled',
+          params TEXT, created_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

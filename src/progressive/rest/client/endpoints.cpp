@@ -103,9 +103,16 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
             return error_response(bhttp::status::forbidden, "M_FORBIDDEN",
                                   "Invalid username or password");
           std::string tok = auth_->create_token(uid);
+          // Refresh token chain
+          std::string rtok = "rt_" + util::random_token(48);
+          db_->execute(
+              "INSERT INTO refresh_tokens (token,user_id,access_token_id,expires_at) VALUES ('" +
+              sql_esc(rtok) + "','" + sql_esc(uid) + "','" + sql_esc(tok) + "'," +
+              std::to_string(util::now_ms() + 2592000000) + ")");
           nlohmann::json resp;
           resp["user_id"] = uid;
           resp["access_token"] = tok;
+          resp["refresh_token"] = rtok;
           resp["home_server"] = sn;
           resp["device_id"] = "AAAAAAAAAAA";
           Res r{bhttp::status::ok, HTTP11};
@@ -559,6 +566,24 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               "INSERT OR IGNORE INTO event_txn_id (event_id,room_id,user_id,txn_id,ts) VALUES ('" +
               sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
               sql_esc(r.user_id) + "','" + sql_esc(p["txnId"]) + "'," + std::to_string(now) + ")");
+
+          // Auth chain indexing
+          auto fe = db_->query(
+              "SELECT a.chain_id,a.sequence_number FROM event_forward_extremities e "
+              "JOIN event_auth_chains a ON e.event_id=a.event_id WHERE e.room_id='" +
+              sql_esc(p["roomId"]) + "' LIMIT 1");
+          if (!fe.empty() && !fe[0]["chain_id"].is_null()) {
+            int64_t chain = fe[0]["chain_id"].template get<int64_t>();
+            int64_t seq = fe[0]["sequence_number"].template get<int64_t>() + 1;
+            db_->execute(
+                "INSERT INTO event_auth_chains (event_id,chain_id,sequence_number) VALUES ('" +
+                sql_esc(ev.event_id.to_string()) + "'," + std::to_string(chain) + "," +
+                std::to_string(seq) + ")");
+          } else {
+            db_->execute(
+                "INSERT INTO event_auth_chains (event_id,chain_id,sequence_number) VALUES ('" +
+                sql_esc(ev.event_id.to_string()) + "'," + std::to_string(now) + ",1)");
+          }
 
           // Forward extremities: remove prevs, add new event
           db_->execute("DELETE FROM event_forward_extremities WHERE room_id='" +

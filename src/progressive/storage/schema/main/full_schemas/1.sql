@@ -38,6 +38,9 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_room_id ON events(room_id);
 CREATE INDEX IF NOT EXISTS events_stream_ordering ON events(stream_ordering);
 CREATE INDEX IF NOT EXISTS events_type ON events(type);
+CREATE INDEX IF NOT EXISTS events_sender ON events(sender);
+CREATE INDEX IF NOT EXISTS events_depth ON events(depth);
+CREATE INDEX IF NOT EXISTS events_state ON events(room_id, type, state_key);
 
 CREATE TABLE IF NOT EXISTS state_events (
     event_id TEXT NOT NULL,

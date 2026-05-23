@@ -126,6 +126,31 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
           auto body = nlohmann::json::parse(req.body());
           std::string user = body.value("username", std::string{});
           std::string pw = body.value("password", std::string{});
+          bool is_guest = false;
+
+          // Guest registration
+          std::string target(req.target());
+          if (target.find("kind=guest") != std::string::npos)
+            is_guest = true;
+          if (body.value("inhibit_login", false))
+            is_guest = true;
+
+          if (is_guest) {
+            user = "guest_" + util::random_token(16);
+            pw = util::random_token(16);
+          }
+
+          // Registration token check
+          std::string reg_token =
+              body.value("auth", nlohmann::json::object()).value("session", std::string{});
+          if (!reg_token.empty()) {
+            auto tok_rows = db_->query("SELECT used FROM registration_tokens WHERE token='" +
+                                       sql_esc(reg_token) + "'");
+            if (tok_rows.empty())
+              return error_response(bhttp::status::forbidden, "M_FORBIDDEN",
+                                    "Invalid registration token");
+          }
+
           if (user.empty() || pw.empty())
             return error_response(bhttp::status::bad_request, "M_BAD_JSON",
                                   "Missing username or password");
@@ -139,6 +164,8 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
             set_cors(r);
             return r;
           }
+          if (is_guest)
+            result["is_guest"] = true;
           Res r{bhttp::status::ok, HTTP11};
           set_json(r, result.dump());
           set_cors(r);

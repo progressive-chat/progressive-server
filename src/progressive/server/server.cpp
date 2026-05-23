@@ -116,7 +116,11 @@ void Server::stop() {
   if (!running_)
     return;
   running_ = false;
-  ioc_.stop();
+  std::cout << "[progressive] draining connections...\n";
+  // Allow 3 seconds for in-flight requests to complete
+  auto work = boost::asio::make_work_guard(ioc_);
+  boost::asio::steady_timer timer(ioc_, std::chrono::seconds(3));
+  timer.async_wait([this, work = std::move(work)](boost::system::error_code) { ioc_.stop(); });
   std::cout << "[progressive] server stopped\n";
 }
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Progressive Matrix Homeserver
+After=network.target postgresql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=progressive
+Group=progressive
+ExecStart=/usr/local/bin/progressive-server -c /etc/progressive/homeserver.yaml
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

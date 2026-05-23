@@ -180,6 +180,11 @@ void apply_schema(DatabasePool& db) {
           event_id TEXT NOT NULL, updated_ts BIGINT,
           PRIMARY KEY (user_id, room_id)
       );
+      CREATE TABLE IF NOT EXISTS registration_tokens (
+          token TEXT PRIMARY KEY,
+          used INTEGER DEFAULT 0,
+          created_ts BIGINT
+      );
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

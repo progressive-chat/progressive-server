@@ -1,10 +1,13 @@
 #include "endpoints.hpp"
 
 #include <atomic>
+#include <iostream>
 #include <nlohmann/json.hpp>
 
 #include "../../auth/event_auth.hpp"
 #include "../../events/event_factory.hpp"
+#include "../../push/base_rules.hpp"
+#include "../../push/evaluator.hpp"
 #include "../../types/matrix_id.hpp"
 #include "../../util/random.hpp"
 #include "../../util/time.hpp"
@@ -310,6 +313,20 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
             }
             if (!ev["state_key"].is_null() && !ev["state_key"].template get<std::string>().empty())
               ej["state_key"] = ev["state_key"];
+
+            // Event visibility: filter out events from kicked/banned members
+            auto sender = ev["sender"].template get<std::string>();
+            auto memchk = db_->query("SELECT membership FROM room_memberships WHERE room_id='" +
+                                     sql_esc(rid) + "' AND user_id='" + sql_esc(sender) + "'");
+            if (!memchk.empty()) {
+              auto& mem = memchk[0]["membership"];
+              if (!mem.is_null()) {
+                auto ms = mem.template get<std::string>();
+                if (ms == "ban" || ms == "leave")
+                  continue;  // Skip events from banned/left users
+              }
+            }
+
             ej["unsigned"] = nlohmann::json::object();
             // Bundled aggregations: reactions
             auto rels = db_->query(
@@ -474,6 +491,14 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               sql_esc(p["eventType"]) + "','" + sql_esc(r.user_id) + "','" +
               sql_esc(ev.content.dump()) + "','',1,'" + sql_esc(ev.origin_server_ts) + "'," +
               std::to_string(now) + ")");
+
+          // Evaluate push rules for notification
+          push::PushRuleEvaluator evaluator(ev.content);
+          auto& rules = push::all_base_rules();
+          auto actions = evaluator.run(rules, "@all:localhost", std::nullopt);
+          if (!actions.empty())
+            std::cout << "[push] notification for event " << ev.event_id.to_string() << "\n";
+
           nlohmann::json resp;
           resp["event_id"] = ev.event_id.to_string();
           Res res{bhttp::status::ok, HTTP11};

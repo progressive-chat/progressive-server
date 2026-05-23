@@ -58,6 +58,10 @@ void Server::setup() {
   auto auth_obj = auth::Auth(*db_);
   media::register_routes(router_, auth_obj, "/tmp/media", config_.server.server_name);
 
+  // Federation sender for outbound transactions
+  fed_sender_ =
+      std::make_unique<federation::FederationSender>(*db_, ioc_, config_.server.server_name);
+
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {
     auto& listener = config_.server.listeners[0];

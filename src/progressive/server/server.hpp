@@ -6,6 +6,7 @@
 
 #include "../config/config.hpp"
 #include "../crypto/signing.hpp"
+#include "../federation/sender.hpp"
 #include "../http/router.hpp"
 #include "../http/server.hpp"
 #include "../ratelimit/ratelimit.hpp"
@@ -37,6 +38,7 @@ private:
   http::Router router_;
   crypto::Ed25519Keypair signing_key_;
   ratelimit::RateLimiter rate_limiter_{50.0, 100.0};
+  std::unique_ptr<federation::FederationSender> fed_sender_;
   bool running_ = false;
 };
 

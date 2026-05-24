@@ -220,6 +220,19 @@ StateMap resolve_events_v2(const RoomVersion& version, const std::vector<StateMa
   for (auto& [key, eids] : conflicted)
     full_conflicted.insert(eids.begin(), eids.end());
 
+  // Auth chain expansion: add auth events of conflicted events
+  // to the conflicted set for proper resolution
+  std::set<EventId> auth_expanded;
+  for (auto& eid : full_conflicted) {
+    auto it = event_map.find(eid);
+    if (it != event_map.end()) {
+      for (auto& aid : it->second.auth_event_ids)
+        if (event_map.find(aid) != event_map.end())
+          auth_expanded.insert(aid);
+    }
+  }
+  full_conflicted.insert(auth_expanded.begin(), auth_expanded.end());
+
   std::vector<EventId> power_events;
   std::vector<EventId> other_events;
   for (auto& eid : full_conflicted) {
@@ -279,6 +292,26 @@ StateMap resolve_events_v2(const RoomVersion& version, const std::vector<StateMa
     if (it == event_map.end())
       continue;
     auto& event = it->second;
+
+    // Mainline depth sort key: find power level event in auth chain
+    int64_t mainline_depth = 0;
+    std::string current = eid;
+    for (int i = 0; i < 10 && !current.empty(); i++) {
+      auto curr_it = event_map.find(current);
+      if (curr_it == event_map.end())
+        break;
+      if (curr_it->second.type == "m.room.power_levels") {
+        mainline_depth = i;
+        break;
+      }
+      if (!curr_it->second.auth_event_ids.empty())
+        current = curr_it->second.auth_event_ids[0];
+      else
+        break;
+    }
+    // Sort by mainline_depth (lower = closer to power event = more authoritative)
+    // Events closer to power event go first
+
     std::vector<ResolvableEvent> auth_vec;
     for (auto& aid : event.auth_event_ids) {
       auto ait = event_map.find(aid);

@@ -7,6 +7,7 @@
 #include "../crypto/signing.hpp"
 #include "../federation/auth.hpp"
 #include "../federation/federation_server.hpp"
+#include "../lemmy/server.hpp"
 #include "../media/media.hpp"
 #include "../rest/client/endpoints.hpp"
 #include "../rest/key/v2/server_key.hpp"
@@ -67,6 +68,9 @@ void Server::setup() {
   // Register media routes
   auto auth_obj = auth::Auth(*db_);
   media::register_routes(router_, auth_obj, "/tmp/media", config_.server.server_name);
+
+  // Register Lemmy routes
+  lemmy::register_lemmy_routes(router_, *db_, config_.server.server_name);
 
   // Federation sender for outbound transactions
   fed_sender_ =

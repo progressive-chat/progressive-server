@@ -332,6 +332,12 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               sql_esc(rid) + "'" +
               (since > 0 ? " AND stream_ordering > " + std::to_string(since) : "") +
               " ORDER BY stream_ordering");
+          // State delta: separate state events from timeline
+          // Build timeline_contains: state events in this batch
+          std::map<std::string, std::string> timeline_contains;  // key="type|state_key"->event_id
+          std::vector<nlohmann::json> timeline_events;
+          std::vector<nlohmann::json> state_events;
+
           for (auto& ev : evr) {
             if (ev["event_id"].is_null())
               continue;
@@ -399,8 +405,45 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               }
               ej["unsigned"]["m.relations"] = aggs;
             }
-            rd["timeline"]["events"].push_back(ej);
+
+            // State delta: state events go to both timeline and state blocks
+            bool is_state_event =
+                !ev["state_key"].is_null() && !ev["state_key"].template get<std::string>().empty();
+            timeline_events.push_back(ej);
+            if (is_state_event) {
+              std::string key = ev["type"].template get<std::string>() + "|" +
+                                ev["state_key"].template get<std::string>();
+              timeline_contains[key] = ev["event_id"].template get<std::string>();
+            }
           }
+
+          // Build state events (all state in room minus timeline_contains)
+          auto all_state = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(rid) +
+                                      "' AND state_key != '' AND state_key IS NOT NULL "
+                                      "ORDER BY depth DESC LIMIT 50");
+          for (auto& se : all_state) {
+            std::string key = se["type"].template get<std::string>() + "|" +
+                              se["state_key"].template get<std::string>();
+            if (timeline_contains.find(key) != timeline_contains.end())
+              continue;
+            nlohmann::json ej;
+            ej["event_id"] = se["event_id"];
+            ej["type"] = se["type"];
+            ej["sender"] = se["sender"];
+            ej["room_id"] = rid;
+            ej["state_key"] = se["state_key"];
+            ej["origin_server_ts"] = se.value("origin_server_ts", "");
+            try {
+              ej["content"] = nlohmann::json::parse(se["content"].template get<std::string>());
+            } catch (...) {
+              ej["content"] = nlohmann::json::object();
+            }
+            ej["unsigned"] = nlohmann::json::object();
+            state_events.push_back(ej);
+          }
+
+          rd["timeline"]["events"] = timeline_events;
+          rd["state"]["events"] = state_events;
           resp["rooms"]["join"][rid] = rd;
         }
 

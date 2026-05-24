@@ -26,3 +26,6 @@ EXPOSE 8008 8448
 USER progressive
 ENTRYPOINT ["/usr/local/bin/progressive-server"]
 CMD ["-c", "/etc/progressive/homeserver.yaml"]
+
+# Copy Grafana dashboard
+COPY contrib/grafana/progressive-dashboard.json /etc/grafana/dashboards/

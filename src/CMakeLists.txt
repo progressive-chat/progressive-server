@@ -52,6 +52,7 @@ add_library(progressive STATIC
   progressive/push/types.cpp
   progressive/push/utils.cpp
   progressive/push/evaluator.cpp
+  progressive/push/gateway.cpp
   progressive/push/base_rules.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp

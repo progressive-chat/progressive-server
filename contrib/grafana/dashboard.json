@@ -1,0 +1,45 @@
+{
+  "title": "Progressive Server",
+  "panels": [
+    {
+      "title": "HTTP Requests/sec",
+      "type": "graph",
+      "targets": [{"expr": "rate(progressive_http_requests_total[1m])"}]
+    },
+    {
+      "title": "Events Processed",
+      "type": "graph",
+      "targets": [{"expr": "rate(progressive_events_processed_total[1m])"}]
+    },
+    {
+      "title": "Database Connections",
+      "type": "stat",
+      "targets": [{"expr": "progressive_database_connections"}]
+    },
+    {
+      "title": "Rate Limit Blocks",
+      "type": "graph",
+      "targets": [{"expr": "rate(progressive_rate_limited_total[1m])"}]
+    },
+    {
+      "title": "IRC Connections",
+      "type": "stat",
+      "targets": [{"expr": "progressive_irc_connections"}]
+    },
+    {
+      "title": "XMPP Streams",
+      "type": "stat",
+      "targets": [{"expr": "progressive_xmpp_streams"}]
+    },
+    {
+      "title": "Lemmy Posts",
+      "type": "stat",
+      "targets": [{"expr": "progressive_lemmy_post_count"}]
+    },
+    {
+      "title": "Push Notifications Sent",
+      "type": "graph",
+      "targets": [{"expr": "rate(progressive_push_sent_total[1m])"}]
+    }
+  ]
+}

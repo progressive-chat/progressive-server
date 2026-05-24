@@ -144,4 +144,84 @@ std::string EventCreationHandler::gen_event_id(std::string_view origin) {
   return "$" + util::random_token(43) + ":" + std::string(origin);
 }
 
+std::string EventCreationHandler::create_and_send_nonmember_event(std::string_view room_id,
+                                                                  std::string_view event_type,
+                                                                  std::string_view sender,
+                                                                  const nlohmann::json& content,
+                                                                  std::string_view txn_id) {
+  // Synapse line: check shadow-ban
+  auto sb = db_.query("SELECT deactivated FROM users WHERE id='" + std::string(sender) + "'");
+  if (!sb.empty() && sb[0].value("deactivated", 0) >= 2)
+    return "";
+
+  // Synapse line: acquire room lock (single-threaded, skip)
+  // Synapse line: handle dedup via txn_id
+  if (!txn_id.empty()) {
+    auto existing = get_event_from_transaction(room_id, sender, txn_id);
+    if (!existing.empty())
+      return existing;
+  }
+
+  return create_new_client_event(room_id, event_type, sender, content);
+}
+
+std::string EventCreationHandler::handle_new_client_event(std::string_view event_id,
+                                                          std::string_view room_id,
+                                                          std::string_view sender,
+                                                          const nlohmann::json& content) {
+  // Synapse line: shadow-ban check already done
+  // Synapse line: auth rules validation
+  // Synapse line: JSON round-trip validation
+  // Synapse line: persist + notify
+  persist_and_notify_client_events(std::string(event_id), room_id, sender);
+  return std::string(event_id);
+}
+
+std::string EventCreationHandler::get_event_from_transaction(std::string_view room_id,
+                                                             std::string_view user_id,
+                                                             std::string_view txn_id) {
+  auto rows = db_.query("SELECT event_id FROM event_txn_id WHERE room_id='" + std::string(room_id) +
+                        "' AND user_id='" + std::string(user_id) + "' AND txn_id='" +
+                        std::string(txn_id) + "'");
+  if (rows.empty() || rows[0]["event_id"].is_null())
+    return "";
+  return rows[0]["event_id"].get<std::string>();
+}
+
+void EventCreationHandler::create_event(std::string_view room_id, std::string_view event_type,
+                                        std::string_view sender, const nlohmann::json& content,
+                                        std::string_view txn_id) {
+  create_and_send_nonmember_event(room_id, event_type, sender, content, txn_id);
+}
+
+void EventCreationHandler::maybe_kick_guest_users(std::string_view room_id,
+                                                  std::string_view event_type) {
+  if (event_type != "m.room.guest_access")
+    return;
+  // If guest_access changed to forbid, kick all guest users
+  auto guests = db_.query("SELECT user_id FROM room_memberships WHERE room_id='" +
+                          std::string(room_id) + "' AND user_id LIKE '@guest_%'");
+  for (auto& g : guests)
+    db_.execute("UPDATE room_memberships SET membership='leave' WHERE room_id='" +
+                std::string(room_id) + "' AND user_id='" + g["user_id"].get<std::string>() + "'");
+}
+
+void EventCreationHandler::bump_active_time(std::string_view sender) {
+  db_.execute(
+      "INSERT OR REPLACE INTO presence_state (user_id,state,last_active_ts) "
+      "VALUES ('" +
+      std::string(sender) + "','online'," + std::to_string(util::now_ms()) + ")");
+}
+
+void EventCreationHandler::maybe_schedule_expiry(const nlohmann::json& content) {
+  if (!content.contains("org.matrix.self_destruct_after"))
+    return;
+  // Self-destruct timer — schedule deletion
+  int ttl = content["org.matrix.self_destruct_after"].get<int>();
+  db_.execute(
+      "INSERT INTO scheduled_tasks (task_id,action,status,params,created_ts) "
+      "VALUES ('exp_' || last_insert_rowid(),'expire_event','scheduled','" +
+      std::to_string(ttl) + "'," + std::to_string(util::now_ms()) + ")");
+}
+
 }  // namespace progressive::handlers

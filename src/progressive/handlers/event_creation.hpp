@@ -24,6 +24,19 @@ public:
                                         std::string_view sender);
 
   bool is_admin_redaction(std::string_view event_id, std::string_view sender);
+  std::string create_and_send_nonmember_event(std::string_view room_id, std::string_view event_type,
+                                              std::string_view sender,
+                                              const nlohmann::json& content,
+                                              std::string_view txn_id);
+  std::string handle_new_client_event(std::string_view event_id, std::string_view room_id,
+                                      std::string_view sender, const nlohmann::json& content);
+  std::string get_event_from_transaction(std::string_view room_id, std::string_view user_id,
+                                         std::string_view txn_id);
+  void create_event(std::string_view room_id, std::string_view event_type, std::string_view sender,
+                    const nlohmann::json& content, std::string_view txn_id);
+  void maybe_kick_guest_users(std::string_view room_id, std::string_view event_type);
+  void bump_active_time(std::string_view sender);
+  void maybe_schedule_expiry(const nlohmann::json& content);
 
 private:
   storage::DatabasePool& db_;

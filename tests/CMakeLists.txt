@@ -5,6 +5,7 @@ set(TEST_SOURCES
   test_state.cpp
   test_push.cpp
   test_protocol.cpp
+  test_matrix_full.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

@@ -329,104 +329,30 @@ void apply_schema(DatabasePool& db) {
           task_id TEXT PRIMARY KEY, action TEXT NOT NULL,
           status TEXT DEFAULT 'scheduled', params TEXT, created_ts BIGINT
       );
-      CREATE TABLE IF NOT EXISTS profiles (
-          user_id TEXT PRIMARY KEY,
-          displayname TEXT,
-          avatar_url TEXT
-      );
-      CREATE TABLE IF NOT EXISTS account_data (
-          user_id TEXT NOT NULL, data_type TEXT NOT NULL,
-          content TEXT NOT NULL,
-          PRIMARY KEY (user_id, data_type)
-      );
-      CREATE TABLE IF NOT EXISTS room_account_data (
-          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
-          data_type TEXT NOT NULL, content TEXT NOT NULL,
-          PRIMARY KEY (user_id, room_id, data_type)
-      );
-      CREATE TABLE IF NOT EXISTS pushers (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id TEXT NOT NULL, app_id TEXT NOT NULL,
-          pushkey TEXT NOT NULL, kind TEXT,
-          app_display_name TEXT, device_display_name TEXT,
-          lang TEXT, data TEXT, last_token TEXT
-      );
-      CREATE TABLE IF NOT EXISTS event_reports (
-          id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL,
-          event_id TEXT NOT NULL, user_id TEXT NOT NULL, score INTEGER DEFAULT 0,
-          reason TEXT, received_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS user_ips (
-          user_id TEXT NOT NULL, access_token TEXT NOT NULL,
-          ip TEXT NOT NULL, user_agent TEXT, last_seen BIGINT,
-          PRIMARY KEY (user_id, access_token, ip)
-      );
-      CREATE TABLE IF NOT EXISTS open_id_tokens (
-          token TEXT PRIMARY KEY, user_id TEXT NOT NULL,
-          expires_at BIGINT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS room_tags (
-          user_id TEXT NOT NULL, room_id TEXT NOT NULL,
-          tag TEXT NOT NULL, content TEXT,
-          PRIMARY KEY (user_id, room_id, tag)
-      );
-      CREATE TABLE IF NOT EXISTS appservice_txns (
-          as_id TEXT PRIMARY KEY, txn_id TEXT NOT NULL, sent_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS delayed_events (
-          delay_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
-          event_type TEXT NOT NULL, sender TEXT, content TEXT,
-          send_at BIGINT NOT NULL, sent INTEGER DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS user_directory (
-          user_id TEXT PRIMARY KEY, display_name TEXT,
-          updated_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS received_transactions (
-          transaction_id TEXT PRIMARY KEY, origin TEXT, received_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS sliding_sync_connections (
-          connection_id TEXT PRIMARY KEY, user_id TEXT NOT NULL,
-          device_id TEXT, pos TEXT, created_ts BIGINT, updated_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms (
-          connection_id TEXT NOT NULL, room_id TEXT NOT NULL,
-          PRIMARY KEY (connection_id, room_id)
-      );
-      CREATE TABLE IF NOT EXISTS experimental_features (
-          user_id TEXT NOT NULL, feature TEXT NOT NULL,
-          enabled INTEGER DEFAULT 0,
-          PRIMARY KEY (user_id, feature)
-      );
-      CREATE TABLE IF NOT EXISTS threepid_tokens (
-          token TEXT PRIMARY KEY, medium TEXT NOT NULL,
-          address TEXT NOT NULL, client_secret TEXT NOT NULL,
-          valid_until_ms BIGINT, user_id TEXT
-      );
-      CREATE TABLE IF NOT EXISTS rendezvous_sessions (
-          session_id TEXT PRIMARY KEY, user_id TEXT,
-          data TEXT, created_ts BIGINT, expires_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS blocked_rooms (
-          room_id TEXT PRIMARY KEY, blocked_by TEXT, reason TEXT, blocked_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS user_external_ids (
-          auth_provider TEXT NOT NULL, external_id TEXT NOT NULL,
-          user_id TEXT NOT NULL, PRIMARY KEY (auth_provider, external_id)
-      );
-      CREATE TABLE IF NOT EXISTS sticky_events (
-          event_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
-          stuck_by TEXT, stuck_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS user_approvals (
-          user_id TEXT PRIMARY KEY, approved INTEGER DEFAULT 0,
-          approved_by TEXT, approved_ts BIGINT
-      );
-      CREATE TABLE IF NOT EXISTS email_queue (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          recipient TEXT NOT NULL, subject TEXT, body TEXT,
-          html_body TEXT, created_ts BIGINT, sent_ts BIGINT, status TEXT DEFAULT 'pending'
-      );
+      -- 24 Synapse tables for full parity
+      CREATE TABLE IF NOT EXISTS application_services_state (as_id TEXT PRIMARY KEY, state TEXT, txn_id TEXT);
+      CREATE TABLE IF NOT EXISTS received_transactions (transaction_id TEXT PRIMARY KEY, origin TEXT, received_ts BIGINT);
+      CREATE TABLE IF NOT EXISTS event_json (event_id TEXT PRIMARY KEY, room_id TEXT, json TEXT);
+      CREATE TABLE IF NOT EXISTS current_state_events (room_id TEXT, type TEXT, state_key TEXT, event_id TEXT, PRIMARY KEY(room_id,type,state_key));
+      CREATE TABLE IF NOT EXISTS rejections (event_id TEXT PRIMARY KEY, reason TEXT, last_check TEXT);
+      CREATE TABLE IF NOT EXISTS redactions (event_id TEXT PRIMARY KEY, redacts TEXT, have_censored INTEGER DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS room_depth (room_id TEXT PRIMARY KEY, min_depth BIGINT);
+      CREATE TABLE IF NOT EXISTS local_media_repository (media_id TEXT PRIMARY KEY, media_type TEXT, media_length BIGINT, upload_name TEXT, user_id TEXT, created_ts BIGINT);
+      CREATE TABLE IF NOT EXISTS remote_media_cache (media_id TEXT, media_origin TEXT, media_type TEXT, filesystem_id TEXT, created_ts BIGINT, PRIMARY KEY(media_id, media_origin));
+      CREATE TABLE IF NOT EXISTS room_alias_servers (room_alias TEXT, server TEXT, PRIMARY KEY(room_alias, server));
+      CREATE TABLE IF NOT EXISTS server_keys_json (server_name TEXT, key_id TEXT, from_server TEXT, ts_added_ms BIGINT, ts_valid_until_ms BIGINT, key_json TEXT);
+      CREATE TABLE IF NOT EXISTS user_threepids (user_id TEXT, medium TEXT, address TEXT, validated_at BIGINT, added_at BIGINT, PRIMARY KEY(user_id, medium, address));
+      CREATE TABLE IF NOT EXISTS room_tags_revisions (user_id TEXT, room_id TEXT, stream_id BIGINT);
+      CREATE TABLE IF NOT EXISTS presence_stream (stream_id BIGINT, user_id TEXT, state TEXT, last_active_ts BIGINT);
+      CREATE TABLE IF NOT EXISTS push_rules_stream (stream_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, rule_id TEXT, op TEXT);
+      CREATE TABLE IF NOT EXISTS ex_outlier_stream (event_stream_ordering BIGINT, event_id TEXT, state_group BIGINT);
+      CREATE TABLE IF NOT EXISTS threepid_guest_access_tokens (medium TEXT, address TEXT, guest_access_token TEXT);
+      CREATE TABLE IF NOT EXISTS pusher_throttle (pusher_id INTEGER, room_id TEXT, throttled_until BIGINT);
+      CREATE TABLE IF NOT EXISTS device_lists_outbound_pokes (destination TEXT, user_id TEXT, stream_id BIGINT, sent BOOLEAN, ts BIGINT);
+      CREATE TABLE IF NOT EXISTS device_lists_stream (stream_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, device_id TEXT);
+      CREATE TABLE IF NOT EXISTS ratelimit_override (user_id TEXT PRIMARY KEY, messages_per_second BIGINT, burst_count BIGINT);
+      CREATE TABLE IF NOT EXISTS pushers (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, app_id TEXT, pushkey TEXT, kind TEXT, app_display_name TEXT, device_display_name TEXT, lang TEXT, data TEXT, last_token TEXT);
+      CREATE TABLE IF NOT EXISTS event_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT, event_id TEXT, user_id TEXT, score INTEGER DEFAULT 0, reason TEXT, received_ts BIGINT);
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

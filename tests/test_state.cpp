@@ -264,3 +264,46 @@ TEST(PowerEvent, MemberEventIsPower) {
   auto ban = make_event("$m2", "m.room.member", "@admin", "@user", 3);
   EXPECT_TRUE(is_power_event(ban));
 }
+
+TEST(StateResolutionV2, EmptyStateSets) {
+  std::vector<StateMap> empty;
+  auto v = get_room_version("10");
+  auto resolved = resolve_events(v, empty, {});
+  EXPECT_TRUE(resolved.empty());
+}
+
+TEST(StateResolutionV2, ConflictedWithAuthEvents) {
+  auto create_key = make_key("m.room.create", "");
+  auto member_key = make_key("m.room.member", "@a");
+  StateMap s1 = {{create_key, "$c1"}, {member_key, "$m1"}};
+  StateMap s2 = {{create_key, "$c1"}, {member_key, "$m2"}};
+  EventMap em;
+  em["$c1"] = make_event("$c1", "m.room.create", "", "@a", 1, 1);
+  em["$m1"] = make_event("$m1", "m.room.member", "@a", "@a", 2, 2);
+  em["$m2"] = make_event("$m2", "m.room.member", "@a", "@a", 3, 3);
+  auto v = get_room_version("10");
+  auto resolved = resolve_events(v, {s1, s2}, em);
+  EXPECT_EQ(resolved[create_key], "$c1");
+  EXPECT_NE(resolved.find(member_key), resolved.end());
+}
+
+TEST(StateResolutionV2, AllVersionsResolve) {
+  for (auto ver : {"1", "2", "3", "6", "10", "11"}) {
+    StateMap s1 = {{make_key("m.room.name", ""), "$n1"}};
+    StateMap s2 = {{make_key("m.room.name", ""), "$n1"}};
+    EventMap em;
+    em["$n1"] = make_event("$n1", "m.room.name", "", "@a", 1, 1);
+    auto v = get_room_version(ver);
+    auto resolved = resolve_events(v, {s1, s2}, em);
+    EXPECT_EQ(resolved.size(), 1u) << "Failed for version " << ver;
+  }
+}
+
+TEST(AuthTypes, PowerLevelsEvent) {
+  auto v = get_room_version("10");
+  ResolvableEvent e = make_event("$pl", "m.room.power_levels", "", "@admin", 5);
+  auto types = auth_types_for_event(v, e);
+  EXPECT_GE(types.size(), 3u);
+  EXPECT_TRUE(types.contains(make_key("m.room.create", "")));
+  EXPECT_TRUE(types.contains(make_key("m.room.power_levels", "")));
+}

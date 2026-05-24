@@ -136,6 +136,38 @@ void register_routes(progressive::http::Router& router, auth::Auth& auth_unit,
         return res;
       },
       "media_download");
+
+  // Thumbnail — serve original as fallback
+  router.add_route(
+      bhttp::verb::get, "/_matrix/media/v3/thumbnail/{serverName}/{mediaId}",
+      [media_dir](bhttp::request<bhttp::string_body>&&,
+                  std::map<std::string, std::string> p) -> bhttp::response<bhttp::string_body> {
+        // Serve original image as fallback thumbnail
+        std::string safe_id = p["mediaId"];
+        safe_id.erase(std::remove(safe_id.begin(), safe_id.end(), '/'), safe_id.end());
+        safe_id.erase(std::remove(safe_id.begin(), safe_id.end(), '\\'), safe_id.end());
+        safe_id = safe_id.substr(0, 64);
+        std::string filename = "upload-" + safe_id;
+        std::string filepath = std::filesystem::path(std::string(media_dir)) / filename;
+        if (!std::filesystem::exists(filepath)) {
+          bhttp::response<bhttp::string_body> res{bhttp::status::not_found, 11};
+          progressive::http::set_json(res,
+                                      R"({"errcode":"M_NOT_FOUND","error":"Media not found"})");
+          return res;
+        }
+        std::ifstream in(filepath, std::ios::binary | std::ios::ate);
+        std::string content(in.tellg(), '\0');
+        in.seekg(0);
+        in.read(content.data(), content.size());
+        std::string ct = "image/png";
+        bhttp::response<bhttp::string_body> res{bhttp::status::ok, 11};
+        res.set(bhttp::field::content_type, ct);
+        res.set(bhttp::field::cache_control, "public, max-age=86400");
+        res.body() = std::move(content);
+        res.prepare_payload();
+        return res;
+      },
+      "media_thumbnail_real");
 }
 
 }  // namespace progressive::media

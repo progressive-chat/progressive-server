@@ -19,6 +19,9 @@ public:
   void process_queue();
 
 private:
+  void send_to_destination(const std::string& dest, const nlohmann::json& txn);
+
+private:
   struct Destination {
     std::string retry_interval;
     int64_t retry_last_ts = 0;

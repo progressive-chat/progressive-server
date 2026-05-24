@@ -41,6 +41,16 @@ void Server::setup() {
   // Apply database schema via migration system
   storage::apply_schema(*db_);
 
+  // Stream ordering monotonicity check
+  auto max_stream = db_->query("SELECT MAX(stream_ordering) as mx FROM events");
+  int64_t max_val = 0;
+  if (!max_stream.empty() && !max_stream[0]["mx"].is_null())
+    max_val = max_stream[0]["mx"].template get<int64_t>();
+  std::cout << "[progressive] max stream ordering: " << max_val << "\n";
+
+  // Set SQLite statement timeout (60s)
+  db_->execute("PRAGMA busy_timeout = 60000");
+
   // Register REST routes
   rest::client::register_routes(*this, router_);
 

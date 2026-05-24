@@ -31,11 +31,18 @@ public:
   boost::asio::io_context& io() { return ioc_; }
   crypto::Ed25519Keypair& signing_key() { return signing_key_; }
   ratelimit::RateLimiter& rate_limiter() { return rate_limiter_; }
+  storage::DatabasePool& irc_db() { return config_.separate_databases ? *irc_db_ : *db_; }
+  storage::DatabasePool& xmpp_db() { return config_.separate_databases ? *xmpp_db_ : *db_; }
+  storage::DatabasePool& lemmy_db() { return config_.separate_databases ? *lemmy_db_ : *db_; }
+  bool separate_databases() const { return config_.separate_databases; }
 
 private:
   config::Config config_;
   boost::asio::io_context ioc_;
   std::unique_ptr<storage::DatabasePool> db_;
+  std::unique_ptr<storage::DatabasePool> irc_db_;
+  std::unique_ptr<storage::DatabasePool> xmpp_db_;
+  std::unique_ptr<storage::DatabasePool> lemmy_db_;
   std::unique_ptr<http::HttpServer> http_server_;
   http::Router router_;
   crypto::Ed25519Keypair signing_key_;

@@ -45,6 +45,7 @@ struct Config {
   email::EmailConfig email;
   redis::RedisConfig redis;
   std::optional<std::string> config_path;
+  bool separate_databases = false;  // true = each protocol has own DB
 
   static Config load(std::string_view path);
   void validate() const;

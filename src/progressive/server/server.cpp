@@ -38,9 +38,20 @@ void Server::setup() {
     }
   }
   db_ = storage::DatabasePool::create(conn);
-
-  // Apply database schema via migration system
   storage::apply_schema(*db_);
+
+  // Separate databases for protocols (if configured)
+  if (config_.separate_databases) {
+    std::cout << "[progressive] separate databases mode enabled\n";
+    irc_db_ = storage::DatabasePool::create("sqlite://irc.db");
+    xmpp_db_ = storage::DatabasePool::create("sqlite://xmpp.db");
+    lemmy_db_ = storage::DatabasePool::create("sqlite://lemmy.db");
+    storage::apply_schema(*irc_db_);
+    storage::apply_schema(*xmpp_db_);
+    storage::apply_schema(*lemmy_db_);
+  } else {
+    std::cout << "[progressive] unified database mode\n";
+  }
 
   // Stream ordering monotonicity check
   auto max_stream = db_->query("SELECT MAX(stream_ordering) as mx FROM events");
@@ -70,18 +81,19 @@ void Server::setup() {
   media::register_routes(router_, auth_obj, "/tmp/media", config_.server.server_name);
 
   // Register Lemmy routes
-  lemmy::register_lemmy_routes(router_, *db_, config_.server.server_name);
+  lemmy::register_lemmy_routes(router_, lemmy_db(), config_.server.server_name);
 
   // Federation sender for outbound transactions
   fed_sender_ =
       std::make_unique<federation::FederationSender>(*db_, ioc_, config_.server.server_name);
 
   // IRC server on port 6667
-  irc_server_ = std::make_unique<irc::IrcServer>(ioc_, 6667, config_.server.server_name, *db_);
+  irc_server_ = std::make_unique<irc::IrcServer>(ioc_, 6667, config_.server.server_name, irc_db());
   irc_server_->start();
 
   // XMPP server on port 5222
-  xmpp_server_ = std::make_unique<xmpp::XmppServer>(ioc_, 5222, config_.server.server_name, *db_);
+  xmpp_server_ =
+      std::make_unique<xmpp::XmppServer>(ioc_, 5222, config_.server.server_name, xmpp_db());
   xmpp_server_->start();
 
   // Start HTTP server on the first listener

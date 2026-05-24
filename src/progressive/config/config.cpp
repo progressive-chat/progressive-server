@@ -56,6 +56,8 @@ Config Config::load(std::string_view path) {
     cfg.database.databases.push_back(d);
   }
 
+  cfg.separate_databases = j.value("separate_databases", false);
+
   cfg.validate();
   return cfg;
 }

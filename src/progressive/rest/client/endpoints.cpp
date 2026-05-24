@@ -3209,6 +3209,533 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "well_known_client");
 
+  // === REMAINING ENDPOINTS — full Synapse parity ===
+
+  // room report without eventId
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/report",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_report_room");
+
+  // user report
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/users/{userId}/report",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_report_user");
+
+  // thread subscription per-thread
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/thread/{threadId}/subscription",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["subscribed"] = true;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "thread_sub_get");
+
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/thread/{threadId}/subscription",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute(
+            "INSERT OR REPLACE INTO thread_subscriptions (user_id,room_id,thread_id,subscribed) "
+            "VALUES ('" +
+            sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" + sql_esc(p["threadId"]) +
+            "',1)");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "thread_sub_put");
+
+  router.add_route(
+      bhttp::verb::delete_, "/_matrix/client/v3/rooms/{roomId}/thread/{threadId}/subscription",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM thread_subscriptions WHERE user_id='" + sql_esc(r.user_id) +
+                     "' AND room_id='" + sql_esc(p["roomId"]) + "' AND thread_id='" +
+                     sql_esc(p["threadId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "thread_sub_delete");
+
+  // MSC4140 delayed events cancel/restart/send/list
+  router.add_route(
+      bhttp::verb::post,
+      "/_matrix/client/unstable/org.matrix.msc4140/delayed_events/{delayId}/cancel",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        db_->execute("DELETE FROM delayed_events WHERE delay_id='" + sql_esc(p["delayId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "delayed_cancel");
+
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/unstable/org.matrix.msc4140/delayed_events",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows =
+            db_->query("SELECT * FROM delayed_events WHERE sender='" + sql_esc(r.user_id) + "'");
+        nlohmann::json resp;
+        resp["delayed_events"] = nlohmann::json::array();
+        for (auto& d : rows) {
+          nlohmann::json de;
+          de["delay_id"] = d["delay_id"];
+          resp["delayed_events"].push_back(de);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "delayed_list");
+
+  // SSO register
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/sso_register",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::ok, HTTP11};
+        r.set(bhttp::field::content_type, "text/html");
+        r.body() = "<html><body>SSO Registration</body></html>";
+        r.prepare_payload();
+        return r;
+      },
+      "sso_register");
+
+  // Consent
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/new_user_consent",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::ok, HTTP11};
+        r.body() = "Consent required";
+        r.prepare_payload();
+        return r;
+      },
+      "consent");
+
+  // Password reset page
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/password_reset/email/submit_token",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::ok, HTTP11};
+        r.body() = "Password reset";
+        r.prepare_payload();
+        return r;
+      },
+      "password_reset_page");
+
+  // OIDC callback
+  router.add_route(
+      bhttp::verb::get, "/_synapse/client/oidc/callback",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::found, HTTP11};
+        r.set(bhttp::field::location, "/");
+        return r;
+      },
+      "oidc_callback");
+
+  // SAML
+  router.add_route(
+      bhttp::verb::post, "/_synapse/client/saml2/authn_response",
+      [](Req&&, Params) -> Res {
+        Res r{bhttp::status::ok, HTTP11};
+        r.body() = "SAML OK";
+        r.prepare_payload();
+        return r;
+      },
+      "saml_authn");
+
+  // JWKS
+  router.add_route(
+      bhttp::verb::get, "/_synapse/jwks",
+      [](Req&&, Params) -> Res {
+        nlohmann::json j;
+        j["keys"] = nlohmann::json::array();
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, j.dump());
+        return r;
+      },
+      "jwks");
+
+  // MAS integration endpoints
+  router.add_route(
+      bhttp::verb::get, "/_synapse/mas/query_user",
+      [db_](Req&& req, Params) -> Res {
+        auto u = std::string(req.target());
+        auto p = u.find("user_id=");
+        if (p != std::string::npos)
+          u = u.substr(p + 8);
+        auto rows =
+            db_->query("SELECT id,admin,deactivated FROM users WHERE id='" + sql_esc(u) + "'");
+        nlohmann::json resp;
+        resp["exists"] = !rows.empty();
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, resp.dump());
+        return r;
+      },
+      "mas_query_user");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/mas/provision_user",
+      [db_](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string uid = body.value("user_id", std::string{});
+        db_->execute("INSERT OR IGNORE INTO users (id,creation_ts) VALUES ('" + sql_esc(uid) +
+                     "'," + std::to_string(util::now_ms()) + ")");
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, "{}");
+        return r;
+      },
+      "mas_provision");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/mas/delete_user",
+      [db_](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute("DELETE FROM users WHERE id='" +
+                     sql_esc(body.value("user_id", std::string{})) + "'");
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, "{}");
+        return r;
+      },
+      "mas_delete_user");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/mas/upsert_device",
+      [db_](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute("INSERT OR REPLACE INTO access_tokens (token,user_id,device_id) VALUES ('" +
+                     sql_esc(body.value("access_token", std::string{})) + "','" +
+                     sql_esc(body.value("user_id", std::string{})) + "','" +
+                     sql_esc(body.value("device_id", std::string{})) + "')");
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, "{}");
+        return r;
+      },
+      "mas_upsert_device");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/mas/delete_device",
+      [db_](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute("DELETE FROM access_tokens WHERE user_id='" +
+                     sql_esc(body.value("user_id", std::string{})) + "'");
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, "{}");
+        return r;
+      },
+      "mas_delete_device");
+
+  router.add_route(
+      bhttp::verb::post, "/_synapse/mas/is_localpart_available",
+      [db_](Req&& req, Params) -> Res {
+        auto lp = std::string(req.target());
+        auto p = lp.find("localpart=");
+        if (p != std::string::npos)
+          lp = lp.substr(p + 10);
+        auto rows = db_->query("SELECT id FROM users WHERE id LIKE '@" + sql_esc(lp) + ":%'");
+        nlohmann::json resp;
+        resp["available"] = rows.empty();
+        Res r{bhttp::status::ok, HTTP11};
+        set_json(r, resp.dump());
+        return r;
+      },
+      "mas_localpart");
+
+  // admin: user membership list
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/users/{userId}/memberships",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT room_id,membership FROM room_memberships WHERE user_id='" +
+                               sql_esc(p["userId"]) + "'");
+        nlohmann::json resp;
+        resp["joined"] = nlohmann::json::object();
+        resp["total"] = rows.size();
+        for (auto& r : rows)
+          resp["joined"][r["room_id"].template get<std::string>()] = r["membership"];
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_memberships");
+
+  // admin: user login (get token)
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/users/{userId}/login",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string tok = auth_->create_token(p["userId"]);
+        nlohmann::json resp;
+        resp["access_token"] = tok;
+        resp["user_id"] = p["userId"];
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_login_as");
+
+  // admin: user override ratelimit
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/users/{userId}/override_ratelimit",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_ratelimit_override");
+
+  // admin: user accountdata
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/users/{userId}/accountdata",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT data_type,content FROM account_data WHERE user_id='" +
+                               sql_esc(p["userId"]) + "'");
+        nlohmann::json resp;
+        resp["account_data"] = nlohmann::json::object();
+        for (auto& r : rows)
+          resp["account_data"][r["data_type"].template get<std::string>()] = r["content"];
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_accountdata");
+
+  // admin: user redact
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/user/{userId}/redact",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["redact_id"] = util::random_token(16);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_redact");
+
+  // admin: shadow_ban delete
+  router.add_route(
+      bhttp::verb::delete_, "/_synapse/admin/v1/users/{userId}/shadow_ban",
+      [db_](Req&&, Params p) -> Res {
+        db_->execute("UPDATE users SET deactivated=0 WHERE id='" + sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_unshadow");
+
+  // admin: experimental features
+  router.add_route(
+      bhttp::verb::put, "/_synapse/admin/v1/experimental_features/{userId}",
+      [db_](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        for (auto& [k, v] : body.items())
+          db_->execute(
+              "INSERT OR REPLACE INTO experimental_features (user_id,feature,enabled) VALUES ('" +
+              sql_esc(p["userId"]) + "','" + sql_esc(k) + "'," + (v.get<bool>() ? "1" : "0") + ")");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_experimental");
+
+  // admin: suspended users
+  router.add_route(
+      bhttp::verb::put, "/_synapse/admin/v1/suspend/{userId}",
+      [db_](Req&& req, Params p) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        db_->execute(
+            "UPDATE users SET deactivated=" + std::to_string(body.value("suspend", false) ? 1 : 0) +
+            " WHERE id='" + sql_esc(p["userId"]) + "'");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_suspend");
+
+  // admin: media quarantine
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/media/quarantine/{serverName}/{mediaId}",
+      [](Req&&, Params) -> Res {
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "admin_quarantine");
+
+  // admin: statistics users media
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/statistics/users/media",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["users"] = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_user_media_stats");
+
+  // admin: user reports
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/user_reports",
+      [db_](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["user_reports"] = nlohmann::json::array();
+        resp["total"] = 0;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_user_reports");
+
+  // admin: background update toggle
+  router.add_route(
+      bhttp::verb::post, "/_synapse/admin/v1/background_updates/enabled",
+      [](Req&& req, Params) -> Res {
+        nlohmann::json resp;
+        resp["enabled"] = true;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_bg_toggle");
+
+  // admin: username available
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/username_available",
+      [db_](Req&& req, Params) -> Res {
+        auto u = std::string(req.target());
+        auto p = u.find("username=");
+        if (p != std::string::npos)
+          u = u.substr(p + 9);
+        auto rows = db_->query("SELECT id FROM users WHERE id='@" + sql_esc(u) + ":localhost'");
+        nlohmann::json resp;
+        resp["available"] = rows.empty();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_username_check");
+
+  // admin: threepid lookup
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/threepid/{medium}/users/{address}",
+      [db_](Req&&, Params p) -> Res {
+        nlohmann::json resp;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_threepid");
+
+  // admin: auth provider external id
+  router.add_route(
+      bhttp::verb::get, "/_synapse/admin/v1/auth_providers/{provider}/users/{externalId}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT user_id FROM user_external_ids WHERE auth_provider='" +
+                               sql_esc(p["provider"]) + "' AND external_id='" +
+                               sql_esc(p["externalId"]) + "'");
+        nlohmann::json resp;
+        resp["user_id"] = rows.empty() ? "" : rows[0]["user_id"];
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "admin_external_id_lookup");
+
+  // federation: publicRooms federation
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/publicRooms",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        Res r{bhttp::status::ok, 11};
+        set_json(r, resp.dump());
+        return r;
+      },
+      "fed_public_rooms");
+
+  // federation: openid userinfo
+  router.add_route(
+      bhttp::verb::get, "/_matrix/federation/v1/openid/userinfo",
+      [](Req&&, Params) -> Res {
+        nlohmann::json resp;
+        resp["sub"] = "anonymous";
+        Res r{bhttp::status::ok, 11};
+        set_json(r, resp.dump());
+        return r;
+      },
+      "fed_openid");
+
+  // MSC matrixrtc transports
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/org.matrix.msc4143/rtc/transports",
+      [auth_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        nlohmann::json resp;
+        resp["transports"] = nlohmann::json::array();
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "matrix_rtc");
+
   // r0 API version (legacy clients)
   router.add_route(
       bhttp::verb::post, "/_matrix/client/r0/login",

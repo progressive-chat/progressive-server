@@ -28,6 +28,8 @@ add_library(progressive STATIC
   progressive/sync/lazy_members.cpp
   progressive/storage/connection_pool.cpp
   progressive/federation/backfill.cpp
+  progressive/worker/pool.cpp
+  progressive/sync/sliding_sync.cpp
   progressive/federation/auth.cpp
   progressive/federation/federation_server.cpp
   progressive/federation/federation_client.cpp

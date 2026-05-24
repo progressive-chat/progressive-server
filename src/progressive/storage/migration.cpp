@@ -353,6 +353,9 @@ void apply_schema(DatabasePool& db) {
       CREATE TABLE IF NOT EXISTS ratelimit_override (user_id TEXT PRIMARY KEY, messages_per_second BIGINT, burst_count BIGINT);
       CREATE TABLE IF NOT EXISTS pushers (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, app_id TEXT, pushkey TEXT, kind TEXT, app_display_name TEXT, device_display_name TEXT, lang TEXT, data TEXT, last_token TEXT);
       CREATE TABLE IF NOT EXISTS event_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT, event_id TEXT, user_id TEXT, score INTEGER DEFAULT 0, reason TEXT, received_ts BIGINT);
+      CREATE TABLE IF NOT EXISTS worker_stream_positions (worker_name TEXT, stream_type INTEGER, position BIGINT, PRIMARY KEY(worker_name, stream_type));
+      CREATE TABLE IF NOT EXISTS worker_locks (lock_name TEXT PRIMARY KEY, worker_name TEXT, acquired_ts BIGINT);
+      CREATE TABLE IF NOT EXISTS replication_stream (stream_id INTEGER PRIMARY KEY AUTOINCREMENT, stream_type INTEGER, row_id BIGINT, data TEXT);
     )");
     db.execute("INSERT OR IGNORE INTO schema_version (version) VALUES (1)");
   }

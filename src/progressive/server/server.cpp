@@ -72,6 +72,14 @@ void Server::setup() {
   fed_sender_ =
       std::make_unique<federation::FederationSender>(*db_, ioc_, config_.server.server_name);
 
+  // IRC server on port 6667
+  irc_server_ = std::make_unique<irc::IrcServer>(ioc_, 6667, config_.server.server_name, *db_);
+  irc_server_->start();
+
+  // XMPP server on port 5222
+  xmpp_server_ = std::make_unique<xmpp::XmppServer>(ioc_, 5222, config_.server.server_name, *db_);
+  xmpp_server_->start();
+
   // Start HTTP server on the first listener
   if (!config_.server.listeners.empty()) {
     auto& listener = config_.server.listeners[0];

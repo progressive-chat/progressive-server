@@ -34,6 +34,9 @@ add_library(progressive STATIC
   progressive/federation/federation_server.cpp
   progressive/federation/federation_client.cpp
   progressive/federation/sender.cpp
+  progressive/irc/parser.cpp
+  progressive/irc/server.cpp
+  progressive/xmpp/server.cpp
   progressive/ratelimit/ratelimit.cpp
   progressive/rest/key/v2/server_key.cpp
   progressive/state/room_version.cpp

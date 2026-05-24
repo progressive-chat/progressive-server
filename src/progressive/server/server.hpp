@@ -9,8 +9,10 @@
 #include "../federation/sender.hpp"
 #include "../http/router.hpp"
 #include "../http/server.hpp"
+#include "../irc/server.hpp"
 #include "../ratelimit/ratelimit.hpp"
 #include "../storage/database.hpp"
+#include "../xmpp/server.hpp"
 
 namespace progressive::server {
 
@@ -39,6 +41,8 @@ private:
   crypto::Ed25519Keypair signing_key_;
   ratelimit::RateLimiter rate_limiter_{50.0, 100.0};
   std::unique_ptr<federation::FederationSender> fed_sender_;
+  std::unique_ptr<irc::IrcServer> irc_server_;
+  std::unique_ptr<xmpp::XmppServer> xmpp_server_;
   bool running_ = false;
 };
 

@@ -4,6 +4,7 @@ set(TEST_SOURCES
   test_types.cpp
   test_state.cpp
   test_push.cpp
+  test_protocol.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

@@ -322,6 +322,235 @@ void register_lemmy_routes(progressive::http::Router& router, storage::DatabaseP
         return r;
       },
       "lemmy_user");
+
+  // POST /api/v3/comment/like
+  router.add_route(
+      bh::verb::post, "/api/v3/comment/like",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        int64_t comment_id = body.value("comment_id", int64_t(0));
+        int score = body.value("score", 0);
+        std::string uid = body.value("creator_id", body.value("auth", std::string{""}));
+        if (score == 0)
+          db.execute("DELETE FROM lemmy_votes WHERE user_id='" + sql_esc(uid) +
+                     "' AND comment_id=" + std::to_string(comment_id));
+        else
+          db.execute("INSERT OR REPLACE INTO lemmy_votes (user_id,comment_id,score) VALUES ('" +
+                     sql_esc(uid) + "'," + std::to_string(comment_id) + "," +
+                     std::to_string(score) + ")");
+        db.execute("UPDATE lemmy_comments SET score=score+" + std::to_string(score) +
+                   " WHERE id=" + std::to_string(comment_id));
+        auto rows =
+            db.query("SELECT score FROM lemmy_comments WHERE id=" + std::to_string(comment_id));
+        nlohmann::json j;
+        j["comment_view"] = {
+            {"comment", {{"id", comment_id}, {"score", rows[0].value("score", 0)}}}};
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_comment_like");
+
+  // POST /api/v3/community/follow
+  router.add_route(
+      bh::verb::post, "/api/v3/community/follow",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        int64_t cid = body.value("community_id", int64_t(0));
+        std::string uid = body.value("creator_id", body.value("auth", std::string{""}));
+        bool follow = body.value("follow", true);
+        if (follow) {
+          db.execute(
+              "INSERT OR IGNORE INTO lemmy_community_subscribers (community_id,user_id) VALUES (" +
+              std::to_string(cid) + ",'" + sql_esc(uid) + "')");
+          db.execute("UPDATE lemmy_communities SET subscriber_count=subscriber_count+1 WHERE id=" +
+                     std::to_string(cid));
+        } else {
+          db.execute("DELETE FROM lemmy_community_subscribers WHERE community_id=" +
+                     std::to_string(cid) + " AND user_id='" + sql_esc(uid) + "'");
+          db.execute(
+              "UPDATE lemmy_communities SET subscriber_count=MAX(0,subscriber_count-1) WHERE id=" +
+              std::to_string(cid));
+        }
+        nlohmann::json j;
+        j["community_view"] = {{"community", {{"id", cid}}},
+                               {"subscribed", follow ? "Subscribed" : "NotSubscribed"}};
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_follow");
+
+  // GET /api/v3/post/list (front page — all posts by hot)
+  router.add_route(
+      bh::verb::get, "/api/v3/post/list",
+      [&db](Req&& req, Params) -> Res {
+        auto t = std::string(req.target());
+        auto p = t.find("type_=");
+        std::string stype = (p != std::string::npos) ? t.substr(p + 6) : "Hot";
+        // Also check for community_id filter
+        auto cp = t.find("community_id=");
+        std::string where =
+            (cp != std::string::npos) ? " WHERE community_id=" + t.substr(cp + 14) : "";
+        std::string order = stype == "New" ? " ORDER BY created_ts DESC" : " ORDER BY score DESC";
+        auto rows = db.query("SELECT * FROM lemmy_posts" + where + order + " LIMIT 20");
+        nlohmann::json j;
+        j["posts"] = nlohmann::json::array();
+        for (auto& r : rows) {
+          Post pt;
+          pt.id = r["id"].template get<int>();
+          pt.name = r["name"];
+          pt.body = r.value("body", "");
+          pt.creator_id = r["creator_id"];
+          pt.community_id = r["community_id"].template get<int>();
+          pt.score = r.value("score", 0);
+          pt.comment_count = r.value("comment_count", 0);
+          j["posts"].push_back({{"post", pt.to_json()}});
+        }
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_front_page");
+
+  // PUT /api/v3/post (edit)
+  router.add_route(
+      bh::verb::put, "/api/v3/post",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        int64_t pid = body.value("post_id", int64_t(0));
+        std::string name = body.value("name", "");
+        std::string bd = body.value("body", "");
+        db.execute("UPDATE lemmy_posts SET name='" + sql_esc(name) + "',body='" + sql_esc(bd) +
+                   "' WHERE id=" + std::to_string(pid));
+        nlohmann::json j;
+        j["post_view"] = {{"post", {{"id", pid}, {"name", name}, {"body", bd}}}};
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_edit_post");
+
+  // DELETE /api/v3/post
+  router.add_route(
+      bh::verb::delete_, "/api/v3/post",
+      [&db](Req&& req, Params) -> Res {
+        auto t = std::string(req.target());
+        auto p = t.find("id=");
+        int64_t pid = (p != std::string::npos) ? std::stoll(t.substr(p + 3)) : 0;
+        db.execute("DELETE FROM lemmy_posts WHERE id=" + std::to_string(pid));
+        db.execute("DELETE FROM lemmy_comments WHERE post_id=" + std::to_string(pid));
+        nlohmann::json j;
+        j["success"] = true;
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_delete_post");
+
+  // POST /api/v3/user/login (Lemmy login via Matrix token)
+  router.add_route(
+      bh::verb::post, "/api/v3/user/login",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string uname = body.value("username_or_email", "");
+        std::string pw = body.value("password", "");
+        auto rows = db.query("SELECT id,password_hash FROM users WHERE id LIKE '@" +
+                             sql_esc(uname) + ":%'");
+        nlohmann::json j;
+        if (!rows.empty() && !rows[0]["password_hash"].is_null()) {
+          j["jwt"] = "lemmy_" + util::random_token(32);
+          auto ur =
+              db.query("SELECT id,admin FROM users WHERE id LIKE '@" + sql_esc(uname) + ":%'");
+          j["person"] = {{"local_user_view", {{"person", {{"id", ur[0]["id"]}, {"name", uname}}}}}};
+        } else {
+          j["error"] = "invalid_login";
+        }
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_login");
+
+  // POST /api/v3/user/register
+  router.add_route(
+      bh::verb::post, "/api/v3/user/register",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        std::string uname = body.value("username", "");
+        std::string pw = body.value("password", "");
+        std::string mx_user = "@" + uname + ":localhost";
+        db.execute("INSERT OR IGNORE INTO users (id,password_hash,creation_ts) VALUES ('" +
+                   sql_esc(mx_user) + "','" + sql_esc(pw) + "'," + std::to_string(util::now_ms()) +
+                   ")");
+        nlohmann::json j;
+        j["jwt"] = "lemmy_" + util::random_token(32);
+        j["person"] = {{"local_user_view", {{"person", {{"name", uname}}}}}};
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_register");
+
+  // PUT /api/v3/comment (edit)
+  router.add_route(
+      bh::verb::put, "/api/v3/comment",
+      [&db](Req&& req, Params) -> Res {
+        auto body = nlohmann::json::parse(req.body());
+        int64_t cid = body.value("comment_id", int64_t(0));
+        std::string content = body.value("content", "");
+        db.execute("UPDATE lemmy_comments SET content='" + sql_esc(content) +
+                   "' WHERE id=" + std::to_string(cid));
+        nlohmann::json j;
+        j["comment_view"] = {{"comment", {{"id", cid}, {"content", content}}}};
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_edit_comment");
+
+  // DELETE /api/v3/comment
+  router.add_route(
+      bh::verb::delete_, "/api/v3/comment",
+      [&db](Req&& req, Params) -> Res {
+        auto t = std::string(req.target());
+        auto p = t.find("id=");
+        int64_t cid = (p != std::string::npos) ? std::stoll(t.substr(p + 3)) : 0;
+        db.execute("UPDATE lemmy_comments SET content='[deleted]' WHERE id=" + std::to_string(cid));
+        nlohmann::json j;
+        j["success"] = true;
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_delete_comment");
+
+  // ActivityPub outbox (federation stub)
+  router.add_route(
+      bh::verb::get, "/api/v3/user/{username}/outbox",
+      [&db](Req&&, Params p) -> Res {
+        nlohmann::json j;
+        j["@context"] = "https://www.w3.org/ns/activitystreams";
+        j["type"] = "OrderedCollection";
+        j["totalItems"] = 0;
+        j["orderedItems"] = nlohmann::json::array();
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_activitypub_outbox");
+
+  // ActivityPub inbox (federation stub)
+  router.add_route(
+      bh::verb::post, "/api/v3/user/{username}/inbox",
+      [&db](Req&& req, Params) -> Res {
+        nlohmann::json j;
+        j["status"] = "ok";
+        Res r{bh::status::ok, 11};
+        ph::set_json(r, j.dump());
+        return r;
+      },
+      "lemmy_activitypub_inbox");
 }
 
 }  // namespace progressive::lemmy

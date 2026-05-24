@@ -22,6 +22,15 @@ public:
   bool check_user_exists(std::string_view user_id);
   std::string hash_password(std::string_view password) const;
   bool validate_hash(std::string_view password, std::string_view hash) const;
+  void add_threepid(std::string_view user_id, std::string_view medium, std::string_view address);
+  void delete_local_threepid(std::string_view user_id, std::string_view medium,
+                             std::string_view address);
+  bool is_user_approved(std::string_view user_id);
+  bool can_change_password();
+  std::string generate_access_token();
+  std::string generate_refresh_token();
+  void delete_access_tokens_for_devices(std::string_view user_id,
+                                        const std::vector<std::string>& devices);
 
 private:
   storage::DatabasePool& db_;

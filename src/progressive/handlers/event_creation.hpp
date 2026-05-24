@@ -37,6 +37,14 @@ public:
   void maybe_kick_guest_users(std::string_view room_id, std::string_view event_type);
   void bump_active_time(std::string_view sender);
   void maybe_schedule_expiry(const nlohmann::json& content);
+  void create_and_send_new_client_events(
+      const std::string& room_id, const std::vector<std::pair<std::string, nlohmann::json>>& events,
+      std::string_view sender);
+  void cache_joined_hosts_for_events(const std::vector<std::string>& event_ids);
+  void validate_canonical_alias(std::string_view room_id, std::string_view alias);
+  void send_dummy_events_to_fill_extremities();
+  void send_dummy_event_for_room(std::string_view room_id);
+  void rebuild_event_after_third_party_rules(nlohmann::json& content);
 
 private:
   storage::DatabasePool& db_;

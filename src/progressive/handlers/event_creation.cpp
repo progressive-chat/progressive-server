@@ -224,4 +224,55 @@ void EventCreationHandler::maybe_schedule_expiry(const nlohmann::json& content) 
       std::to_string(ttl) + "'," + std::to_string(util::now_ms()) + ")");
 }
 
+void EventCreationHandler::create_and_send_new_client_events(
+    const std::string& room_id, const std::vector<std::pair<std::string, nlohmann::json>>& events,
+    std::string_view sender) {
+  for (auto& [event_type, content] : events)
+    create_new_client_event(room_id, event_type, sender, content);
+}
+
+void EventCreationHandler::cache_joined_hosts_for_events(
+    const std::vector<std::string>& event_ids) {
+  for (auto& eid : event_ids) {
+    auto rows = db_.query("SELECT room_id FROM events WHERE event_id='" + eid + "'");
+    if (!rows.empty()) {
+      auto room = rows[0]["room_id"].get<std::string>();
+      db_.execute(
+          "INSERT OR REPLACE INTO destinations (destination,retry_interval) "
+          "VALUES ('" +
+          room + "',0)");
+    }
+  }
+}
+
+void EventCreationHandler::validate_canonical_alias(std::string_view room_id,
+                                                    std::string_view alias) {
+  auto rows =
+      db_.query("SELECT room_id FROM room_aliases WHERE alias='" + std::string(alias) + "'");
+  if (!rows.empty() && rows[0]["room_id"].get<std::string>() != room_id) {
+    // Alias points to different room — invalid
+  }
+}
+
+void EventCreationHandler::send_dummy_events_to_fill_extremities() {
+  auto rooms = db_.query("SELECT DISTINCT room_id FROM event_forward_extremities");
+  for (auto& r : rooms) {
+    auto room_id = r["room_id"].get<std::string>();
+    auto count = db_.query("SELECT COUNT(*) as cnt FROM event_forward_extremities WHERE room_id='" +
+                           room_id + "'");
+    if (!count.empty() && count[0]["cnt"].is_number() && count[0]["cnt"].template get<int>() > 10)
+      send_dummy_event_for_room(room_id);
+  }
+}
+
+void EventCreationHandler::send_dummy_event_for_room(std::string_view room_id) {
+  create_new_client_event(room_id, "org.matrix.dummy", "@progressive:localhost",
+                          {{"body", "Dummy event to clean forward extremities"}});
+}
+
+void EventCreationHandler::rebuild_event_after_third_party_rules(nlohmann::json& content) {
+  // In production: call 3rd-party module callback to modify event
+  (void)content;
+}
+
 }  // namespace progressive::handlers

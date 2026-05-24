@@ -103,4 +103,44 @@ bool AuthHandler::validate_hash(std::string_view password, std::string_view hash
   return hash_password(password) == hash;
 }
 
+void AuthHandler::add_threepid(std::string_view user_id, std::string_view medium,
+                               std::string_view address) {
+  db_.execute(
+      "INSERT OR IGNORE INTO user_external_ids (auth_provider,external_id,user_id) "
+      "VALUES ('" +
+      std::string(medium) + "','" + std::string(address) + "','" + std::string(user_id) + "')");
+}
+
+void AuthHandler::delete_local_threepid(std::string_view user_id, std::string_view medium,
+                                        std::string_view address) {
+  db_.execute("DELETE FROM user_external_ids WHERE auth_provider='" + std::string(medium) +
+              "' AND external_id='" + std::string(address) + "' AND user_id='" +
+              std::string(user_id) + "'");
+}
+
+bool AuthHandler::is_user_approved(std::string_view user_id) {
+  auto rows =
+      db_.query("SELECT approved FROM user_approvals WHERE user_id='" + std::string(user_id) + "'");
+  return !rows.empty() && rows[0].value("approved", 0) != 0;
+}
+
+bool AuthHandler::can_change_password() {
+  return true;  // Config-based in Synapse
+}
+
+std::string AuthHandler::generate_access_token() {
+  return gen_token("syt", 64);
+}
+
+std::string AuthHandler::generate_refresh_token() {
+  return gen_token("syr", 48);
+}
+
+void AuthHandler::delete_access_tokens_for_devices(std::string_view user_id,
+                                                   const std::vector<std::string>& devices) {
+  for (auto& d : devices)
+    db_.execute("DELETE FROM access_tokens WHERE user_id='" + std::string(user_id) +
+                "' AND device_id='" + d + "'");
+}
+
 }  // namespace progressive::handlers

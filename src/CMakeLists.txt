@@ -26,6 +26,7 @@ add_library(progressive STATIC
   progressive/rest/client/endpoints.cpp
   progressive/media/media.cpp
   progressive/sync/lazy_members.cpp
+  progressive/storage/connection_pool.cpp
   progressive/federation/backfill.cpp
   progressive/federation/auth.cpp
   progressive/federation/federation_server.cpp

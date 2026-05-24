@@ -24,6 +24,8 @@ public:
            FederationCallback cb);
 
 private:
+  void do_request(std::string_view server, std::string_view path, std::string_view method,
+                  std::string body, FederationCallback cb);
   boost::asio::io_context& ioc_;
 };
 

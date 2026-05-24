@@ -36,7 +36,9 @@ add_library(progressive STATIC
   progressive/federation/sender.cpp
   progressive/irc/parser.cpp
   progressive/irc/server.cpp
+  progressive/irc/services.cpp
   progressive/xmpp/server.cpp
+  progressive/xmpp/extensions.cpp
   progressive/lemmy/types.cpp
   progressive/lemmy/server.cpp
   progressive/activitypub/types.cpp

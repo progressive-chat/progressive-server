@@ -10,6 +10,7 @@
 
 #include "../storage/database.hpp"
 #include "parser.hpp"
+#include "services.hpp"
 
 namespace progressive::irc {
 
@@ -34,6 +35,7 @@ private:
   boost::asio::ip::tcp::acceptor acceptor_;
   std::string server_name_;
   storage::DatabasePool& db_;
+  IrcServices services_;
   std::map<std::string, std::shared_ptr<class IrcClient>> clients_;
   std::map<std::string, IrcChannel, std::less<>> channels_;
 

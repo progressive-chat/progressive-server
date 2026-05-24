@@ -59,6 +59,7 @@ add_library(progressive STATIC
   progressive/handlers/device_handler.cpp
   progressive/handlers/e2e_keys_handler.cpp
   progressive/handlers/message_handler.cpp
+  progressive/handlers/admin_handler.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

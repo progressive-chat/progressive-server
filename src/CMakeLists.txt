@@ -61,6 +61,7 @@ add_library(progressive STATIC
   progressive/handlers/message_handler.cpp
   progressive/handlers/admin_handler.cpp
   progressive/handlers/more_handlers.cpp
+  progressive/handlers/remaining_handlers.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

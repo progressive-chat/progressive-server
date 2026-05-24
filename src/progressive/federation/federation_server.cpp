@@ -125,13 +125,19 @@ void register_federation_routes(storage::DatabasePool& db, progressive::http::Ro
                                              "PDU sender must match transaction origin");
               }
 
-              // Check for duplicate event
+              // CVE-2025-30355: Validate depth range to prevent DoS
+              if (pdu.depth < 0 || pdu.depth > 100000000) {
+                return make_federation_error(bhttp::status::bad_request, "M_INVALID_PARAM",
+                                             "Event depth out of valid range");
+              }
+
+              // Check for duplicate event (idempotent ingestion)
               auto existing = db.query("SELECT event_id FROM events WHERE event_id='" +
                                        sql_esc(pdu_json.value("event_id", std::string{})) + "'");
               if (!existing.empty())
-                continue;  // skip duplicate
+                continue;
               db.execute(
-                  "INSERT OR REPLACE INTO events "
+                  "INSERT OR IGNORE INTO events "
                   "(event_id,room_id,type,sender,content,state_key,depth,"
                   "origin_server_ts,stream_ordering) VALUES ('" +
                   sql_esc(pdu.event_id) + "','" + sql_esc(pdu.room_id) + "','" + sql_esc(pdu.type) +

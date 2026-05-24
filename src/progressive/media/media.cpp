@@ -76,7 +76,14 @@ void register_routes(progressive::http::Router& router, auth::Auth& auth_unit,
       bhttp::verb::get, "/_matrix/media/v3/download/{serverName}/{mediaId}",
       [media_dir](bhttp::request<bhttp::string_body>&&,
                   std::map<std::string, std::string> p) -> bhttp::response<bhttp::string_body> {
-        std::string filename = "upload-" + p["mediaId"];
+        // CVE-2021-41281: Sanitize mediaId to prevent path traversal
+        std::string safe_id = p["mediaId"];
+        safe_id.erase(std::remove(safe_id.begin(), safe_id.end(), '/'), safe_id.end());
+        safe_id.erase(std::remove(safe_id.begin(), safe_id.end(), '\\'), safe_id.end());
+        safe_id.erase(std::remove(safe_id.begin(), safe_id.end(), '.'), safe_id.end());
+        safe_id = safe_id.substr(0, 64);
+
+        std::string filename = "upload-" + safe_id;
         std::string filepath = std::filesystem::path(std::string(media_dir)) / filename;
 
         if (!std::filesystem::exists(filepath)) {

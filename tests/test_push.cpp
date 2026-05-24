@@ -325,3 +325,25 @@ TEST(PushEvaluator, TombstoneNotification) {
   auto actions = evaluator.run(all_base_rules(), "@alice:localhost", std::nullopt);
   EXPECT_GT(actions.size(), 0u);
 }
+
+TEST(PushEvaluator, BulkEvaluation) {
+  nlohmann::json ev;
+  ev["type"] = "m.room.message";
+  ev["sender"] = "@bob:localhost";
+  ev["content"]["msgtype"] = "m.text";
+  ev["content"]["body"] = "hello";
+  PushRuleEvaluator evaluator(ev, 10);
+  auto& rules = all_base_rules();
+  for (auto uid : {"@alice:localhost", "@charlie:localhost"}) {
+    auto actions = evaluator.run(rules, uid, std::nullopt);
+    EXPECT_GT(actions.size(), 0u) << "Failed for user " << uid;
+  }
+}
+
+TEST(EventFlatten, NestedRelatesTo) {
+  nlohmann::json ev;
+  ev["content"]["m.relates_to"]["rel_type"] = "m.replace";
+  ev["content"]["m.relates_to"]["event_id"] = "$original";
+  auto flat = flatten_event(ev);
+  EXPECT_TRUE(flat.contains("content.m\\.relates_to.rel_type"));
+}

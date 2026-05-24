@@ -1,0 +1,6 @@
+apiVersion: v2
+name: progressive-server
+description: Multi-protocol Matrix homeserver — MX + IRC + XMPP + Lemmy + ActivityPub
+type: application
+version: 0.1.0
+appVersion: 0.1.0

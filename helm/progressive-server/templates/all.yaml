@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: progressive-server
+  template:
+    metadata:
+      labels:
+        app: progressive-server
+    spec:
+      containers:
+      - name: progressive-server
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        ports:
+        - containerPort: {{ .Values.service.matrixPort }}
+          name: matrix
+        - containerPort: {{ .Values.service.federationPort }}
+          name: federation
+        - containerPort: {{ .Values.service.ircPort }}
+          name: irc
+        - containerPort: {{ .Values.service.xmppPort }}
+          name: xmpp
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: matrix
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: matrix
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/progressive
+        - name: data
+          mountPath: /var/lib/progressive
+      volumes:
+      - name: config
+        configMap:
+          name: {{ .Release.Name }}-config
+      - name: data
+        {{- if .Values.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-data
+        {{- else }}
+        emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - port: {{ .Values.service.matrixPort }}
+    name: matrix
+  - port: {{ .Values.service.federationPort }}
+    name: federation
+  - port: {{ .Values.service.ircPort }}
+    name: irc
+  - port: {{ .Values.service.xmppPort }}
+    name: xmpp
+  selector:
+    app: progressive-server
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  homeserver.yaml: |
+    server_name: "{{ .Values.config.server_name }}"
+    public_baseurl: "{{ .Values.config.public_baseurl }}"
+    listeners:
+      - port: {{ .Values.service.matrixPort }}
+        bind_addresses:
+          - "0.0.0.0"
+        type: http
+      - port: {{ .Values.service.federationPort }}
+        bind_addresses:
+          - "0.0.0.0"
+        type: http
+    database:
+      name: postgresql
+      args:
+        user: {{ .Values.postgresql.user }}
+        password: {{ .Values.postgresql.password }}
+        host: {{ .Values.postgresql.host }}
+        database: {{ .Values.postgresql.database }}
+{{- if .Values.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,38 @@
+replicaCount: 1
+
+image:
+  repository: progressive-chat/progressive-server
+  pullPolicy: IfNotPresent
+  tag: latest
+
+service:
+  type: LoadBalancer
+  matrixPort: 8008
+  federationPort: 8448
+  ircPort: 6667
+  xmppPort: 5222
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+
+postgresql:
+  enabled: true
+  host: progressive-postgres
+  port: 5432
+  user: progressive
+  password: progressive
+  database: progressive
+
+resources:
+  limits:
+    memory: 1Gi
+    cpu: 1000m
+  requests:
+    memory: 256Mi
+    cpu: 250m
+
+config:
+  server_name: "progressive.local"
+  public_baseurl: "https://progressive.local"

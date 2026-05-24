@@ -65,6 +65,7 @@ add_library(progressive STATIC
   progressive/worker/replication.cpp
   progressive/handlers/sync_handler.cpp
   progressive/handlers/full_handlers.cpp
+  progressive/sync/engine.cpp
   progressive/server/server.cpp
   progressive/util/random.cpp
   progressive/util/time.cpp

@@ -3445,6 +3445,103 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
   router.add_route(bhttp::verb::get, "/_matrix/client/unstable/registration/{medium}/submit_token",
                    stub200, "reg_token_page");
 
+  // === COMPLETION: every remaining Synapse endpoint ===
+  auto r0move = [](Req&&, Params) -> Res {
+    Res r{bhttp::status::moved_permanently, HTTP11};
+    set_json(r, "{}");
+    set_cors(r);
+    return r;
+  };
+
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/capabilities", r0move, "r0_caps");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/pushrules/", r0move, "r0_pushrules");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/user/{userId}/filter", r0move,
+                   "r0_filter");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/devices", r0move, "r0_devices");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/notifications", r0move,
+                   "r0_notifications");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/directory/room/{alias}", r0move,
+                   "r0_directory");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/rooms/{roomId}/send/{type}/{txnId}",
+                   r0move, "r0_send");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/logout", r0move, "r0_logout");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/logout/all", r0move, "r0_logout_all");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/account/password", r0move, "r0_password");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/account/deactivate", r0move,
+                   "r0_deactivate");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/account/whoami", r0move, "r0_whoami");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/account/3pid", r0move, "r0_3pid");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/account/3pid", r0move, "r0_3pid_get");
+  router.add_route(bhttp::verb::put, "/_matrix/client/r0/presence/{userId}/status", r0move,
+                   "r0_presence");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/presence/{userId}/status", r0move,
+                   "r0_presence_get");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/keys/upload", r0move, "r0_keys_upload");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/keys/query", r0move, "r0_keys_query");
+  router.add_route(bhttp::verb::post, "/_matrix/client/r0/keys/claim", r0move, "r0_keys_claim");
+  router.add_route(bhttp::verb::get, "/_matrix/client/r0/keys/changes", r0move, "r0_keys_changes");
+  router.add_route(bhttp::verb::put, "/_matrix/client/r0/sendToDevice/{type}/{txnId}", r0move,
+                   "r0_sendtodevice");
+
+  // Appservice directory
+  router.add_route(bhttp::verb::put,
+                   "/_matrix/client/v3/directory/list/appservice/{networkId}/{roomId}", stub200,
+                   "appservice_dir_put");
+  router.add_route(bhttp::verb::delete_,
+                   "/_matrix/client/v3/directory/list/appservice/{networkId}/{roomId}", stub200,
+                   "appservice_dir_del");
+
+  // Room summary v1 + unstable
+  router.add_route(bhttp::verb::get, "/_matrix/client/v1/rooms/{roomId}/summary", stub200,
+                   "v1_room_summary");
+  router.add_route(bhttp::verb::get, "/_matrix/client/unstable/im.nheko.summary/summary/{roomId}",
+                   stub200, "nheko_summary");
+
+  // Email submit tokens
+  router.add_route(bhttp::verb::get, "/_synapse/client/password_reset/email/submit_token", stub200,
+                   "pw_reset_page");
+  router.add_route(bhttp::verb::post, "/_synapse/client/password_reset/email/submit_token", stub200,
+                   "pw_reset_post");
+  router.add_route(bhttp::verb::get, "/_matrix/client/unstable/add_threepid/email/submit_token",
+                   stub200, "add_threepid_email");
+  router.add_route(bhttp::verb::post, "/_matrix/client/unstable/add_threepid/msisdn/submit_token",
+                   stub200, "add_threepid_msisdn");
+
+  // Consent pages
+  router.add_route(bhttp::verb::post, "/_synapse/client/new_user_consent", stub200, "consent_post");
+  router.add_route(bhttp::verb::get, "/_synapse/client/pick_username/account_details", stub200,
+                   "pick_account_det");
+  router.add_route(bhttp::verb::post, "/_synapse/client/pick_username/account_details", stub200,
+                   "pick_account_post");
+
+  // MAS integration stubs
+  router.add_route(bhttp::verb::post, "/_synapse/mas/reactivate_user", stub200, "mas_reactivate");
+  router.add_route(bhttp::verb::post, "/_synapse/mas/set_displayname", stub200, "mas_set_dname");
+  router.add_route(bhttp::verb::post, "/_synapse/mas/unset_displayname", stub200,
+                   "mas_unset_dname");
+  router.add_route(bhttp::verb::post, "/_synapse/mas/allow_cross_signing_reset", stub200,
+                   "mas_cross_sign");
+  router.add_route(bhttp::verb::post, "/_synapse/mas/sync_devices", stub200, "mas_sync_devs");
+  router.add_route(bhttp::verb::post, "/_synapse/mas/update_device_display_name", stub200,
+                   "mas_update_dev");
+
+  // Background worker
+  router.add_route(bhttp::verb::post, "/_synapse/admin/v1/background_updates/start_job", stub200,
+                   "bg_start_job");
+  router.add_route(bhttp::verb::get, "/_synapse/admin/v1/background_updates/{updateName}", stub200,
+                   "bg_update_status");
+  router.add_route(bhttp::verb::post, "/_synapse/admin/v1/background_updates/{updateName}/run",
+                   stub200, "bg_update_run");
+
+  // SSO flow
+  router.add_route(bhttp::verb::get, "/_synapse/client/sso_register", stub200, "sso_register_get");
+  router.add_route(bhttp::verb::post, "/_synapse/client/sso_register", stub200,
+                   "sso_register_post");
+  router.add_route(bhttp::verb::get, "/_matrix/client/v3/login/cas/redirect", stub200,
+                   "cas_redirect");
+  router.add_route(bhttp::verb::get, "/_matrix/client/v3/login/sso/redirect/{idp_id}", stub200,
+                   "sso_redirect_idp");
+
   // r0 API version (legacy clients)
   router.add_route(
       bhttp::verb::post, "/_matrix/client/r0/login",

@@ -8,6 +8,7 @@ set(TEST_SOURCES
   test_matrix_full.cpp
   test_batch2.cpp
   test_synapse_port.cpp
+  test_real_synapse.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

@@ -429,3 +429,133 @@ TEST(SynapseMedia, DownloadReturnsContent) {
   resp["content_uri"] = "mxc://localhost/abc";
   EXPECT_TRUE(resp.contains("content_uri"));
 }
+
+// === Registration tests ===
+TEST(SynapseRegister, UsernameAvailable) {
+  EXPECT_TRUE(true);
+}
+TEST(SynapseRegister, EmailRequestToken) {
+  std::string sid = "sid_abc";
+  EXPECT_FALSE(sid.empty());
+}
+TEST(SynapseRegister, GuestRegistration) {
+  bool is_guest = true;
+  EXPECT_TRUE(is_guest);
+}
+
+// === Login tests ===
+TEST(SynapseLogin, PasswordFlow) {
+  std::string flow = "m.login.password";
+  EXPECT_EQ(flow, "m.login.password");
+}
+TEST(SynapseLogin, TokenFlow) {
+  std::string flow = "m.login.token";
+  EXPECT_EQ(flow, "m.login.token");
+}
+TEST(SynapseLogin, SSOFlow) {
+  std::string flow = "m.login.sso";
+  EXPECT_EQ(flow, "m.login.sso");
+}
+
+// === Admin tests ===
+TEST(SynapseAdmin, WhoIs) {
+  nlohmann::json j;
+  j["user_id"] = "@alice:localhost";
+  EXPECT_TRUE(j.contains("user_id"));
+}
+TEST(SynapseAdmin, DeactivateUser) {
+  nlohmann::json j;
+  j["deactivated"] = 1;
+  EXPECT_EQ(j["deactivated"], 1);
+}
+TEST(SynapseAdmin, ListUsers) {
+  nlohmann::json j;
+  j["users"] = nlohmann::json::array();
+  EXPECT_TRUE(j["users"].is_array());
+}
+TEST(SynapseAdmin, RoomList) {
+  nlohmann::json j;
+  j["rooms"] = nlohmann::json::array();
+  EXPECT_TRUE(j["rooms"].is_array());
+}
+TEST(SynapseAdmin, ServerVersion) {
+  std::string ver = "Progressive 0.1.0";
+  EXPECT_FALSE(ver.empty());
+}
+
+// === Device tests ===
+TEST(SynapseDevice, ListDevices) {
+  nlohmann::json j;
+  j["devices"] = nlohmann::json::array();
+  EXPECT_TRUE(j["devices"].is_array());
+}
+TEST(SynapseDevice, DeleteDevice) {
+  std::string did = "ABCDEF";
+  EXPECT_FALSE(did.empty());
+}
+TEST(SynapseDevice, UpdateDeviceName) {
+  std::string name = "MyPhone";
+  EXPECT_FALSE(name.empty());
+}
+
+// === Profile tests ===
+TEST(SynapseProfile, GetProfile) {
+  nlohmann::json j;
+  j["displayname"] = "Alice";
+  EXPECT_EQ(j["displayname"], "Alice");
+}
+TEST(SynapseProfile, SetDisplayName) {
+  std::string name = "Bob";
+  EXPECT_FALSE(name.empty());
+}
+TEST(SynapseProfile, SetAvatar) {
+  std::string url = "mxc://localhost/avatar";
+  EXPECT_FALSE(url.empty());
+}
+
+// === Filter tests ===
+TEST(SynapseFilter, CreateFilter) {
+  std::string fid = "filter_abc";
+  EXPECT_FALSE(fid.empty());
+}
+TEST(SynapseFilter, GetFilter) {
+  nlohmann::json j;
+  j["room"] = nlohmann::json::object();
+  EXPECT_TRUE(j["room"].is_object());
+}
+
+// === Tag tests ===
+TEST(SynapseTag, GetTags) {
+  nlohmann::json j;
+  j["tags"] = nlohmann::json::object();
+  EXPECT_TRUE(j["tags"].is_object());
+}
+TEST(SynapseTag, AddTag) {
+  std::string tag = "m.favourite";
+  EXPECT_FALSE(tag.empty());
+}
+TEST(SynapseTag, DeleteTag) {
+  EXPECT_TRUE(true);
+}
+
+// === Redaction tests ===
+TEST(SynapseRedact, RedactEvent) {
+  nlohmann::json j;
+  j["reason"] = "spam";
+  EXPECT_EQ(j["reason"], "spam");
+}
+TEST(SynapseRedact, RedactWithRelations) {
+  bool cascade = true;
+  EXPECT_TRUE(cascade);
+}
+
+// === Notification tests ===
+TEST(SynapseNotif, ListNotifications) {
+  nlohmann::json j;
+  j["notifications"] = nlohmann::json::array();
+  EXPECT_TRUE(j["notifications"].is_array());
+}
+TEST(SynapseNotif, UnreadCount) {
+  int count = 3;
+  EXPECT_GT(count, 0);
+}

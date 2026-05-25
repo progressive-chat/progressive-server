@@ -7,6 +7,7 @@ set(TEST_SOURCES
   test_protocol.cpp
   test_matrix_full.cpp
   test_batch2.cpp
+  test_synapse_port.cpp
 )
 
 foreach(test_src ${TEST_SOURCES})

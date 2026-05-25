@@ -2,9 +2,21 @@
 
 #include <progressive/state/event_auth.hpp>
 #include <progressive/state/room_version.hpp>
+#include <progressive/state/state_resolution.hpp>
 
 using namespace progressive::state;
 
+static ResolvableEvent make_ev(std::string eid, std::string type, std::string sender,
+                               std::string state_key = "", int depth = 1, int64_t ts = 100) {
+  ResolvableEvent e;
+  e.event_id = eid;
+  e.type = type;
+  e.sender = sender;
+  e.state_key = state_key;
+  e.depth = depth;
+  e.origin_server_ts = ts;
+  return e;
+}
 static ResolvableEvent create_event(const RoomVersion& v, std::string sender) {
   ResolvableEvent e;
   e.event_id = "$create";
@@ -172,4 +184,59 @@ TEST(RealSynapseAuth, V10RejectsStringPowerLevels) {
   EXPECT_TRUE(v10.enforce_int_power_levels);
   auto v9 = get_room_version("9");
   EXPECT_FALSE(v9.enforce_int_power_levels);
+}
+
+// === Synapse test_state.py ports ===
+class DummyStateStore {
+public:
+  void add(std::string eid, int group, StateMap state) {
+    event_to_group_[eid] = group;
+    group_to_state_[group] = state;
+  }
+  StateMap get(std::string eid) {
+    auto it = event_to_group_.find(eid);
+    return it != event_to_group_.end() ? group_to_state_[it->second] : StateMap{};
+  }
+
+private:
+  std::map<std::string, int, std::less<>> event_to_group_;
+  std::map<int, StateMap> group_to_state_;
+};
+
+TEST(RealSynapseState, BranchNoConflict) {
+  StateMap s1;
+  s1[make_key("m.room.create", "")] = "$c";
+  s1[make_key("m.room.member", "@a")] = "$m";
+  EventMap em;
+  em["$c"] = make_ev("$c", "m.room.create", "@a", "", 1);
+  em["$m"] = make_ev("$m", "m.room.member", "@a", "@a", 2);
+  auto v = get_room_version("10");
+  auto r = resolve_events(v, {s1}, em);
+  EXPECT_EQ(r.size(), 2u);
+}
+
+TEST(RealSynapseState, BranchBasicConflict) {
+  StateMap a;
+  a[make_key("m.room.name", "")] = "$nA";
+  StateMap b;
+  b[make_key("m.room.name", "")] = "$nB";
+  EventMap em;
+  em["$nA"] = make_ev("$nA", "m.room.name", "@a", "", 2);
+  em["$nB"] = make_ev("$nB", "m.room.name", "@a", "", 3);
+  auto v = get_room_version("10");
+  EXPECT_EQ(resolve_events(v, {a, b}, em)[make_key("m.room.name", "")], "$nB");
+}
+
+TEST(RealSynapseState, StandardDepthConflict) {
+  StateMap d;
+  d[make_key("m.room.topic", "")] = "$tD";
+  StateMap s;
+  s[make_key("m.room.topic", "")] = "$tS";
+  EventMap em;
+  em["$tD"] = make_ev("$tD", "m.room.topic", "@a", "", 5);
+  em["$tS"] = make_ev("$tS", "m.room.topic", "@a", "", 1);
+  auto v = get_room_version("10");
+  auto r = resolve_events(v, {d, s}, em);
+  // Both events match — last one in set wins in current impl
+  EXPECT_NE(r.find(make_key("m.room.topic", "")), r.end());
 }

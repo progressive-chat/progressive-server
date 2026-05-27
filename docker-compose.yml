@@ -1,36 +1,209 @@
-version: "3.8"
+# =============================================================================
+# Progressive Server — Docker Compose (Development)
+# =============================================================================
+# Start everything:
+#   docker compose up -d
+#
+# Stop everything:
+#   docker compose down
+#
+# Reset (destroy volumes — irreversible):
+#   docker compose down -v
+#
+# Services:
+#   progressive   – the main server binary (built from Dockerfile)
+#   postgres      – PostgreSQL 16 (production-grade database)
+#   valkey        – optional caching layer (for rate limiting, sessions)
+#
+# The progressive service expects a Dockerfile in this directory.
+# If you do not have one yet, run:
+#   docker compose build
+#   docker compose up -d
+# =============================================================================
+
+version: "3.9"
 
 services:
+
+  # =========================================================================
+  # Progressive Server
+  # =========================================================================
   progressive:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Build type: Debug, Release, RelWithDebInfo, MinSizeRel
+        CMAKE_BUILD_TYPE: RelWithDebInfo
+        # Number of parallel compile jobs (0 = auto-detect)
+        BUILD_JOBS: "0"
+    image: progressive-chat/progressive-server:latest
+
+    container_name: progressive
+
     ports:
+      # Matrix client-server API
       - "8008:8008"
+      # Matrix federation API
       - "8448:8448"
+      # IRC (plain)
+      - "6667:6667"
+      - "6668:6668"
+      - "6669:6669"
+      # IRC (TLS)
+      - "6697:6697"
+      # XMPP C2S
+      - "5222:5222"
+      # XMPP S2S
+      - "5269:5269"
+      # Lemmy HTTP API
+      - "8536:8536"
+      # Prometheus metrics (bound to localhost by default)
+      - "127.0.0.1:9100:9100"
+
     volumes:
-      - ./homeserver.yaml:/etc/progressive/homeserver.yaml:ro
+      # Mount the config file read-only
+      - ./progressive.yaml:/etc/progressive/progressive.yaml:ro
+      # Persistent media store (uploads, avatars, attachments)
       - progressive_media:/var/lib/progressive/media
+      # Persistent data directory (SQLite DB, signing keys, etc.)
       - progressive_data:/var/lib/progressive/data
+      # TLS certificates (optional — mount your own)
+      # - ./certs:/etc/progressive/certs:ro
+
+    environment:
+      # Override config path if needed
+      PROGRESSIVE_CONFIG: /etc/progressive/progressive.yaml
+
     depends_on:
       postgres:
         condition: service_healthy
+      valkey:
+        condition: service_started
+
     restart: unless-stopped
 
+    # Health check: call the /health endpoint
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8008/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+    # Resource limits (adjust for your hardware)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+          cpus: "0.5"
+
+  # =========================================================================
+  # PostgreSQL
+  # =========================================================================
   postgres:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
+    container_name: progressive-postgres
+
     environment:
       POSTGRES_USER: progressive
       POSTGRES_PASSWORD: progressive
       POSTGRES_DB: progressive
+      # Additional databases used when separate_databases: true
+      # POSTGRES_MULTIPLE_DATABASES: "progressive_matrix,progressive_irc,progressive_xmpp"
+
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Optional: mount init scripts
+      # - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+    ports:
+      # Expose PostgreSQL to the host for debugging / pgAdmin
+      - "127.0.0.1:5432:5432"
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U progressive"]
+      test: ["CMD-SHELL", "pg_isready -U progressive -d progressive"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+
     restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # =========================================================================
+  # Valkey (Redis-compatible cache)
+  # =========================================================================
+  # Used for rate-limiting counters, session tokens, and ephemeral data.
+  # Remove this service and its depends_on if you do not need caching.
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: progressive-valkey
+
+    command: >
+      valkey-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+
+    volumes:
+      - valkeydata:/data
+
+    ports:
+      - "127.0.0.1:6379:6379"
+
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.5"
+
+# =============================================================================
+# Named volumes
+# =============================================================================
 
 volumes:
   pgdata:
+    driver: local
+    name: progressive_pgdata
+
   progressive_media:
+    driver: local
+    name: progressive_media
+
   progressive_data:
+    driver: local
+    name: progressive_data
+
+  valkeydata:
+    driver: local
+    name: progressive_valkeydata
+
+# =============================================================================
+# Networks (optional — Docker Compose creates a default network automatically)
+# =============================================================================
+# Uncomment to customise:
+#
+# networks:
+#   progressive-net:
+#     driver: bridge
+#     ipam:
+#       config:
+#         - subnet: 172.28.0.0/16

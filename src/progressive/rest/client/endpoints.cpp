@@ -92,6 +92,8 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
               body.value("identifier", nlohmann::json::object()).value("user", std::string{});
           if (uid.empty())
             uid = body.value("user", std::string{});
+          if (!uid.empty() && uid[0] != '@')
+            uid = "@" + uid + ":" + sn;
           std::string pw = body.value("password", std::string{});
           if (uid.empty() || pw.empty())
             return error_response(bhttp::status::bad_request, "M_BAD_JSON",
@@ -873,6 +875,30 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "client_send");
 
+  // room state without explicit stateKey (defaults to empty string)
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/state/{eventType}",
+      [db_](Req&&, Params p) -> Res {
+        auto rows = db_->query("SELECT * FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+                               "' AND type='" + sql_esc(p["eventType"]) + "' AND state_key='' LIMIT 1");
+        if (rows.empty())
+          return error_response(bhttp::status::not_found, "M_NOT_FOUND", "State event not found");
+        nlohmann::json resp;
+        resp["event_id"] = rows[0]["event_id"];
+        resp["type"] = rows[0]["type"];
+        resp["sender"] = rows[0]["sender"];
+        try {
+          resp["content"] = nlohmann::json::parse(rows[0]["content"].template get<std::string>());
+        } catch (...) {
+          resp["content"] = nlohmann::json::object();
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_state_nokey");
+
   // room state
   router.add_route(
       bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey}",
@@ -897,6 +923,40 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
         return res;
       },
       "client_state");
+
+  // PUT state without explicit stateKey (defaults to empty string)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/state/{eventType}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        p["stateKey"] = "";  // default state key
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          auto rid = RoomID::from_string(p["roomId"]);
+          auto ev = events::create_local_event(rid, p["eventType"], r.user_id, body, "");
+          ev.event_id = EventID::from_string("$" + util::random_token(43) + ":" + sn);
+          uint64_t now = util::now_ms();
+          db_->execute(
+              "INSERT INTO events "
+              "(event_id,room_id,type,sender,content,state_key,depth,origin_server_ts,stream_"
+              "ordering) VALUES ('" +
+              sql_esc(ev.event_id.to_string()) + "','" + sql_esc(p["roomId"]) + "','" +
+              sql_esc(p["eventType"]) + "','" + sql_esc(r.user_id) + "','" +
+              sql_esc(ev.content.dump()) + "','',1,'" +
+              sql_esc(ev.origin_server_ts) + "'," + std::to_string(now) + ")");
+          nlohmann::json resp;
+          resp["event_id"] = ev.event_id.to_string();
+          Res res{bhttp::status::ok, HTTP11};
+          set_json(res, resp.dump());
+          set_cors(res);
+          return res;
+        } catch (const std::exception& e) {
+          return error_response(bhttp::status::internal_server_error, "M_UNKNOWN", e.what());
+        }
+      },
+      "client_state_put_nokey");
 
   router.add_route(
       bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/state/{eventType}/{stateKey}",
@@ -3394,6 +3454,249 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
       },
       "jwks");
 
+  // === MISSING CRITICAL ENDPOINTS ===
+
+  // join/{roomIdOrAlias} — POST
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/join/{roomIdOrAlias}",
+      [auth_, db_, sn](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string target = p["roomIdOrAlias"];
+        std::string room_id = target;
+        // Resolve alias to room_id if needed
+        if (target[0] == '#') {
+          auto rows = db_->query("SELECT room_id FROM room_aliases WHERE alias='" + sql_esc(target) + "'");
+          if (!rows.empty()) room_id = rows[0]["room_id"];
+        }
+        uint64_t now = util::now_ms();
+        db_->execute(
+            "INSERT OR REPLACE INTO room_memberships "
+            "(event_id,room_id,user_id,membership,sender,content) VALUES "
+            "('$join_" + util::random_token(32) + ":" + sn + "','" + sql_esc(room_id) + "','" +
+            sql_esc(r.user_id) + "','join','" + sql_esc(r.user_id) + "','{}')");
+        nlohmann::json resp;
+        resp["room_id"] = room_id;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_join");
+
+  // rooms/{roomId}/messages — GET
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/rooms/{roomId}/messages",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        std::string dir = "b";
+        std::string target(req.target());
+        auto qp = target.find("dir=");
+        if (qp != std::string::npos) dir = target.substr(qp+4, 1);
+        std::string order = (dir == "b") ? "DESC" : "ASC";
+        auto rows = db_->query(
+            "SELECT event_id,room_id,type,sender,content,state_key,depth,origin_server_ts "
+            "FROM events WHERE room_id='" + sql_esc(p["roomId"]) +
+            "' ORDER BY depth " + order + ", stream_ordering " + order + " LIMIT 50");
+        nlohmann::json resp;
+        resp["start"] = "";
+        resp["end"] = "";
+        resp["chunk"] = nlohmann::json::array();
+        for (auto& row : rows) {
+          nlohmann::json ev;
+          ev["event_id"] = row["event_id"];
+          ev["room_id"] = row["room_id"];
+          ev["type"] = row["type"];
+          ev["sender"] = row["sender"];
+          try { ev["content"] = nlohmann::json::parse(row["content"].template get<std::string>()); }
+          catch (...) { ev["content"] = nlohmann::json::object(); }
+          if (!row["state_key"].is_null()) ev["state_key"] = row["state_key"];
+          ev["origin_server_ts"] = row["origin_server_ts"];
+          resp["chunk"].push_back(ev);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_messages");
+
+  // publicRooms — GET + POST
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/publicRooms",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto rows = db_->query("SELECT room_id,creator FROM rooms WHERE is_public=1 LIMIT 50");
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        resp["total_room_count_estimate"] = rows.size();
+        for (auto& row : rows) {
+          nlohmann::json rj;
+          rj["room_id"] = row["room_id"];
+          rj["name"] = row["room_id"];
+          resp["chunk"].push_back(rj);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_public_rooms_get");
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/publicRooms",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto rows = db_->query("SELECT room_id,creator FROM rooms WHERE is_public=1 LIMIT 50");
+        nlohmann::json resp;
+        resp["chunk"] = nlohmann::json::array();
+        resp["total_room_count_estimate"] = rows.size();
+        for (auto& row : rows) {
+          nlohmann::json rj;
+          rj["room_id"] = row["room_id"];
+          resp["chunk"].push_back(rj);
+        }
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_public_rooms_post");
+
+  // joined_rooms — GET
+  router.add_route(
+      bhttp::verb::get, "/_matrix/client/v3/joined_rooms",
+      [auth_, db_](Req&& req, Params) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        auto rows = db_->query("SELECT room_id FROM room_memberships WHERE user_id='" +
+                               sql_esc(r.user_id) + "' AND membership='join'");
+        nlohmann::json resp;
+        resp["joined_rooms"] = nlohmann::json::array();
+        for (auto& row : rows)
+          resp["joined_rooms"].push_back(row["room_id"]);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_joined_rooms");
+
+  // read receipt — POST
+  router.add_route(
+      bhttp::verb::post, "/_matrix/client/v3/rooms/{roomId}/receipt/m.read/{eventId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        uint64_t now = util::now_ms();
+        db_->execute("INSERT OR REPLACE INTO read_receipts (user_id,room_id,event_id,updated_ts) VALUES ('" +
+                     sql_esc(r.user_id) + "','" + sql_esc(p["roomId"]) + "','" +
+                     sql_esc(p["eventId"]) + "'," + std::to_string(now) + ")");
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_receipt");
+
+  // typing — PUT
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/rooms/{roomId}/typing/{userId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_typing");
+
+  // sendToDevice — PUT
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/sendToDevice/{eventType}/{txnId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          if (body.contains("messages")) {
+            for (auto& [uid, devs] : body["messages"].items()) {
+              for (auto& [did, payload] : devs.items()) {
+                db_->execute(
+                    "INSERT INTO device_inbox (user_id,device_id,type,sender,content,stream_id) VALUES ('" +
+                    sql_esc(uid) + "','" + sql_esc(did) + "','" + sql_esc(p["eventType"]) +
+                    "','" + sql_esc(r.user_id) + "','" + sql_esc(payload.dump()) + "'," +
+                    std::to_string(util::now_ms()) + ")");
+              }
+            }
+          }
+        } catch (...) {}
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_send_to_device");
+
+  // media upload — POST
+  router.add_route(
+      bhttp::verb::post, "/_matrix/media/v3/upload",
+      [auth_, db_, sn](Req&& req, Params) -> Res {
+        std::string media_id = "m_" + util::random_token(24);
+        std::string content_type = std::string(req[bhttp::field::content_type]);
+        if (content_type.empty()) content_type = "application/octet-stream";
+        uint64_t now = util::now_ms();
+        db_->execute("INSERT INTO local_media_repository (media_id,media_type,media_length,upload_name,user_id,created_ts) VALUES ('" +
+                     sql_esc(media_id) + "','" + sql_esc(content_type) + "'," +
+                     std::to_string(req.body().size()) + ",'upload','system'," + std::to_string(now) + ")");
+        nlohmann::json resp;
+        resp["content_uri"] = "mxc://" + sn + "/" + media_id;
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, resp.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_media_upload");
+
+  // media download — GET
+  router.add_route(
+      bhttp::verb::get, "/_matrix/media/v3/download/{serverName}/{mediaId}",
+      [](Req&&, Params p) -> Res {
+        Res res{bhttp::status::not_found, HTTP11};
+        nlohmann::json body;
+        body["errcode"] = "M_NOT_FOUND";
+        body["error"] = "Media not found: " + p["mediaId"];
+        set_json(res, body.dump());
+        set_cors(res);
+        return res;
+      },
+      "client_media_download");
+
+  // directory list room — PUT (set room visibility)
+  router.add_route(
+      bhttp::verb::put, "/_matrix/client/v3/directory/list/room/{roomId}",
+      [auth_, db_](Req&& req, Params p) -> Res {
+        auto r = check_auth(*auth_, req);
+        if (!r.success)
+          return error_response(bhttp::status::unauthorized, r.errcode, r.error);
+        try {
+          auto body = nlohmann::json::parse(req.body());
+          int vis = body.value("visibility", std::string{"private"}) == "public" ? 1 : 0;
+          db_->execute("UPDATE rooms SET is_public=" + std::to_string(vis) +
+                       " WHERE room_id='" + sql_esc(p["roomId"]) + "'");
+        } catch (...) {}
+        Res res{bhttp::status::ok, HTTP11};
+        set_json(res, "{}");
+        set_cors(res);
+        return res;
+      },
+      "client_directory_list");
+
   // === FINAL STUBS for deprecated/unstable/internal paths ===
   auto stub301 = [](Req&&, Params) -> Res {
     Res resp{bhttp::status::moved_permanently, HTTP11};
@@ -3446,9 +3749,12 @@ void register_routes(server::Server& server, progressive::http::Router& router) 
                    stub200, "reg_token_page");
 
   // === COMPLETION: every remaining Synapse endpoint ===
-  auto r0move = [](Req&&, Params) -> Res {
-    Res r{bhttp::status::moved_permanently, HTTP11};
-    set_json(r, "{}");
+  auto r0move = [](Req&& req, Params) -> Res {
+    Res r{bhttp::status::gone, HTTP11};
+    nlohmann::json body;
+    body["errcode"] = "M_GONE";
+    body["error"] = "The r0 API has been removed. Use /_matrix/client/v3/ instead.";
+    set_json(r, body.dump());
     set_cors(r);
     return r;
   };

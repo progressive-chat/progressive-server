@@ -90,7 +90,7 @@ target_compile_definitions(progressive PRIVATE
   BOOST_BEAST_USE_STD_STRING_VIEW=1
 )
 
-target_compile_options(progressive PRIVATE -Wno-error=return-type)
+target_compile_options(progressive PRIVATE -Wno-error=return-type -fpermissive)
 
 if(SQLite3_FOUND OR TARGET PkgConfig::SQLite3)
   if(TARGET SQLite::SQLite3)

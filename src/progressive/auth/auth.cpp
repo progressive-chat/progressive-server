@@ -1,6 +1,5 @@
 #include "auth.hpp"
 
-#include <openssl/evp.h>
 #include <openssl/sha.h>
 
 #include <nlohmann/json.hpp>
@@ -12,17 +11,6 @@
 #include "../util/token.hpp"
 
 namespace progressive::auth {
-
-static std::string sql_escape(std::string_view s) {
-  std::string out;
-  for (char c : s) {
-    if (c == '\'')
-      out += "''";
-    else
-      out += c;
-  }
-  return out;
-}
 
 Auth::Auth(storage::DatabasePool& db) : db_(db) {}
 
@@ -37,21 +25,33 @@ bool Auth::verify_password(std::string_view password, std::string_view hash) con
   return hash_password(password) == hash;
 }
 
+static std::string esc(std::string_view s) {
+  std::string out;
+  for (char c : s) {
+    if (c == '\'') out += "''"; else out += c;
+  }
+  return out;
+}
+
 AuthResult Auth::validate_token(std::string_view token) {
   AuthResult result;
-
   auto rows = db_.query(
-      "SELECT user_id, device_id FROM access_tokens "
-      "WHERE token = '" +
-      sql_escape(token) + "'");
+      "SELECT user_id, device_id FROM access_tokens WHERE token = '" + esc(token) + "'");
 
-  if (rows.empty() || !rows[0].contains("user_id") || rows[0]["user_id"].is_null()) {
+  if (rows.empty()) {
     result.error = "Unknown token";
     result.errcode = "M_UNKNOWN_TOKEN";
     return result;
   }
 
-  std::string user_id = rows[0]["user_id"].get<std::string>();
+  auto& row = rows[0];
+  if (!row.contains("user_id") || row["user_id"].is_null()) {
+    result.error = "Unknown token";
+    result.errcode = "M_UNKNOWN_TOKEN";
+    return result;
+  }
+
+  std::string user_id = row["user_id"].get<std::string>();
   result.user_id = user_id;
   result.success = true;
   result.requester = Requester(UserID::from_string(user_id));
@@ -62,15 +62,13 @@ AuthResult Auth::validate_token(std::string_view token) {
 std::string Auth::create_token(std::string_view user_id) {
   auto token = util::generate_access_token();
   db_.execute(
-      "INSERT INTO access_tokens (token, user_id) "
-      "VALUES ('" +
-      sql_escape(token) + "', '" + sql_escape(user_id) + "')");
+      "INSERT INTO access_tokens (token, user_id) VALUES ('" +
+      esc(token) + "', '" + esc(user_id) + "')");
   return token;
 }
 
 nlohmann::json Auth::register_user(std::string_view user_id, std::string_view password) {
-  // Check if user exists
-  auto rows = db_.query("SELECT id FROM users WHERE id = '" + sql_escape(user_id) + "'");
+  auto rows = db_.query("SELECT id FROM users WHERE id = '" + esc(user_id) + "'");
   if (!rows.empty() && !rows[0]["id"].is_null()) {
     return {{"errcode", "M_USER_IN_USE"}, {"error", "User ID already taken"}};
   }
@@ -79,23 +77,21 @@ nlohmann::json Auth::register_user(std::string_view user_id, std::string_view pa
   uint64_t now = util::now_ms();
 
   db_.execute(
-      "INSERT INTO users (id, password_hash, creation_ts) "
-      "VALUES ('" +
-      sql_escape(user_id) + "', '" + sql_escape(pw_hash) + "', " + std::to_string(now) + ")");
+      "INSERT INTO users (id, password_hash, creation_ts) VALUES ('" +
+      esc(user_id) + "', '" + esc(pw_hash) + "', " + std::to_string(now) + ")");
 
   std::string token = create_token(user_id);
   std::string uid(user_id);
 
   return {{"user_id", uid},
           {"access_token", token},
-          {"home_server", "localhost"},  // TODO: from config
+          {"home_server", "localhost"},
           {"device_id", ""}};
 }
 
 std::optional<Requester> Auth::get_user_by_token(std::string_view token) {
   auto result = validate_token(token);
-  if (!result.success)
-    return std::nullopt;
+  if (!result.success) return std::nullopt;
   return result.requester;
 }
 

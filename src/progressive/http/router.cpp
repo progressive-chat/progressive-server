@@ -18,7 +18,7 @@ void Router::add_route(boost_http::verb method, std::string pattern, Handler han
         break;
       auto param = pattern.substr(pos + 1, end - pos - 1);
       param_names.push_back(param);
-      re_str += "([^/]+)";
+      re_str += "([^/]*)";
       pos = end + 1;
     } else {
       if (pattern[pos] == '.')

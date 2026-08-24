@@ -13,6 +13,7 @@ happened when.
 | 3 | `c2c18b46` | 2020-02-20 | feat: database (sled, plaintext passwords, login) | `03_c2c18b46_database` |
 | 4 | `34a53ce2` | 2020-03-28 | Better database structure (Data layer, hostname) | `04_34a53ce2_data_layer` |
 | 5 | `533260ed` | 2020-03-29 | Add auth (four-tree model, tokens, password check) | `05_533260ed_auth` |
+| 6 | `fa322689` | 2020-04-03 | feat: save pdus (event DAG, reference-hash event ids) | `06_fa322689_save_pdus` |
 
 Skipped upstream commits (nothing or too little to translate):
 
@@ -20,9 +21,12 @@ Skipped upstream commits (nothing or too little to translate):
 - `1679da77` 2020-03-27 "RUST_LOG=info by default" — logging default
 - `6d27f155` 2020-03-28 "More logging" — tracing only
 - `744e0adf` 2020-03-28 "Try to impl auth in ruma_wrapper" — WIP superseded by step 5
-- `1183105f`, `18ed991b`, `b508b4d1`, `dba6c466`, `22cca206` — trait plumbing,
-  merge, message-events groundwork (todo!() stubs), prefix_search refactor,
-  TODO note; candidates for a future step 6
+- `22cca206`, `dba6c466`, `b508b4d1` 2020-03-29/30 — todo!() stubs + prefix_search refactor (folded into steps 5/6)
+- `1183105f`, `18ed991b` 2020-03-29 — trait plumbing / merge commit
+- Apr 3–10 dummies (`f9cfede2`…`040296c7`) — async migration, PduEvent struct,
+  dummy endpoints for Riot compatibility; superseded by step 6's real storage
+- `abcce95d` 2020-04-14 invites/user search, `fa9e127a` hashed passwords,
+  `2f638889` README — candidates for a future step 7
 
 Every directory builds independently:
 

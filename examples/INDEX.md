@@ -12,14 +12,17 @@ happened when.
 | 2 | `cd777af4` | 2020-02-18 | feat: simple endpoint handlers | `02_cd777af4_simple_endpoint_handlers` |
 | 3 | `c2c18b46` | 2020-02-20 | feat: database (sled, plaintext passwords, login) | `03_c2c18b46_database` |
 | 4 | `34a53ce2` | 2020-03-28 | Better database structure (Data layer, hostname) | `04_34a53ce2_data_layer` |
+| 5 | `533260ed` | 2020-03-29 | Add auth (four-tree model, tokens, password check) | `05_533260ed_auth` |
 
 Skipped upstream commits (nothing or too little to translate):
 
 - `6fffcecf` 2020-03-27 "Updates" — Cargo.lock dependency bump only
 - `1679da77` 2020-03-27 "RUST_LOG=info by default" — logging default
 - `6d27f155` 2020-03-28 "More logging" — tracing only
-- `744e0adf` 2020-03-28 "Try to impl auth in ruma_wrapper" — WIP, superseded
-- `1183105f`, `18ed991b` 2020-03-29 — trait plumbing / merge commit
+- `744e0adf` 2020-03-28 "Try to impl auth in ruma_wrapper" — WIP superseded by step 5
+- `1183105f`, `18ed991b`, `b508b4d1`, `dba6c466`, `22cca206` — trait plumbing,
+  merge, message-events groundwork (todo!() stubs), prefix_search refactor,
+  TODO note; candidates for a future step 6
 
 Every directory builds independently:
 

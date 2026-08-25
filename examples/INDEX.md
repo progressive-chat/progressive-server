@@ -35,6 +35,7 @@ is needed.
 | 5 | `533260ed` | 2020-03-29 | Add auth (four-tree model, tokens, password check) | `05_533260ed_auth` |
 | 6 | `fa322689` | 2020-04-03 | feat: save pdus (event DAG, reference-hash event ids) | `06_fa322689_save_pdus` |
 | 7 | `fa9e127a` | 2020-04-14 | Store hashed passwords (Argon2id + integration tests) | `07_fa9e127a_store_hashed_passwords` |
+| 8 | `abcce95d` | 2020-04-14 | Invites, room state tree, public directory, user search | `08_abcce95d_invites_user_search` |
 
 Skipped upstream commits (nothing or too little to translate):
 
@@ -46,7 +47,7 @@ Skipped upstream commits (nothing or too little to translate):
   todo!() stubs; folded into steps 5/6
 - Apr 3–10 dummies (`f9cfede2`…`040296c7`) — async migration, PduEvent struct,
   dummy endpoints for Riot compatibility
-- Candidate for a future step 8: `abcce95d` invites/user search (Apr 14)
+- Candidates beyond: typing/receipts EDUs (`3debb620`, `3b9cadee`), profile endpoints (`062c5521`)
 
 ## Source file ↔ upstream file mapping
 

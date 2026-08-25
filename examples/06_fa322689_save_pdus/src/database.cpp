@@ -3,7 +3,6 @@
 #include "utils.hpp"
 
 #include <cstdio>
-#include <stdexcept>
 
 namespace stubdb {
 
@@ -21,24 +20,13 @@ std::vector<std::pair<std::string, std::string>> MultiValue::get_iter(
 }
 
 void MultiValue::clear(const std::string& id) {
-  for (const auto& [key, value] : get_iter(id)) {
-    tree_.erase(key);
-  }
+  for (const auto& [key, value] : get_iter(id)) tree_.erase(key);
 }
 
 void MultiValue::add(const std::string& id, const std::string& value) {
   // The new value will need a new index. We store the last used index in 'n' + id.
   const std::string count_key = "n" + id;
-  const std::string index = tree_.update_and_fetch(count_key, [](const auto& old) {
-    uint64_t number = old ? utils::u64_from_bytes(*old) : 0;
-    ++number;
-    std::string bytes(8, '\0');
-    for (int i = 0; i < 8; ++i) {
-      bytes[static_cast<size_t>(i)] =
-          static_cast<char>((number >> ((7 - i) * 8)) & 0xFF);
-    }
-    return bytes;
-  });
+  const std::string index = tree_.update_and_fetch(count_key, utils::increment);
 
   std::string key = data_prefix(id);
   key += utils::u64_from_bytes(index);

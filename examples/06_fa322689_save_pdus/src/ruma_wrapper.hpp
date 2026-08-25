@@ -1,13 +1,11 @@
-// ruma_wrapper.hpp — translation of Conduit's src/ruma_wrapper.rs
+// ruma_wrapper.hpp — translation of Conduit's src/ruma_wrapper.rs as of
+// commit fa322689.
 //
-// Rust original:
+//   Ruma<T>       : body extractor + auth resolution (user_id since 533260ed)
+//   MatrixResult<T>: Result<T, Error> responder
 //
-//   pub struct Ruma<T>(pub T);   // Rocket FromData guard: JSON body -> ruma type
-//   pub struct MatrixResult<T>(pub Result<T, Error>);  // Responder
-//
-// C++: httplib gives us raw requests; `Ruma<T>::from_request` does the body
-// deserialization with nlohmann (our serde_json), MatrixResult serializes the
-// typed response or a spec-shaped error.
+// Each request struct carries REQUIRES_AUTH, standing in for ruma's
+// Endpoint::METADATA.requires_authentication.
 
 #pragma once
 
@@ -22,7 +20,7 @@
 
 namespace ruma {
 
-using json = nlohmann::json;  // sorted object keys => canonical-ish output
+using json = nlohmann::json;  // sorted object keys => canonical dumps
 
 enum class ErrorKind {
   InvalidUsername,
@@ -30,20 +28,8 @@ enum class ErrorKind {
   Forbidden,
   Unknown,
   NotFound,
-};
-
-struct LoginRequest {
-  bool user_is_matrix_id = false;
-  std::optional<std::string> user_localpart;
-  std::optional<std::string> password;      // ignored by c2c18b46!
-  std::optional<std::string> device_id;
-};
-
-struct LoginResponse {
-  std::string user_id;
-  std::string access_token;
-  std::optional<std::string> home_server;
-  std::string device_id;
+  MissingToken,
+  UnknownToken,
 };
 
 struct Error {
@@ -54,9 +40,8 @@ struct Error {
 
 const char* errcode(ErrorKind kind);
 
-// --- typed requests/responses (the ruma-client-api structs) ------------------
-
 struct RegisterRequest {
+  static constexpr bool REQUIRES_AUTH = false;
   std::optional<std::string> username;
   std::optional<std::string> password;
   std::optional<std::string> device_id;
@@ -69,14 +54,73 @@ struct RegisterResponse {
   std::string device_id;
 };
 
+struct LoginRequest {
+  static constexpr bool REQUIRES_AUTH = false;
+
+  bool user_is_matrix_id = false;
+  std::optional<std::string> user_localpart;
+  std::optional<std::string> password;   // checked since 533260ed
+  std::optional<std::string> device_id;
+};
+
+struct LoginResponse {
+  std::string user_id;
+  std::string access_token;
+  std::optional<std::string> home_server;  // omitted when None, like serde skip
+  std::string device_id;
+};
+
+struct GetSupportedVersionsResponse {
+  std::vector<std::string> versions;
+  std::map<std::string, std::string> unstable_features;
+};
+
+struct GetAliasResponse {
+  std::string room_id;
+  std::vector<std::string> servers;
+};
+
+struct JoinRoomByIdRequest {
+  static constexpr bool REQUIRES_AUTH = false;
+  std::string room_id;
+};
+
+struct JoinRoomByIdResponse {
+  std::string room_id;
+};
+
+// NEW in 533260ed / fa322689:
+struct CreateMessageEventRequest {
+  static constexpr bool REQUIRES_AUTH = true;  // METADATA.requires_authentication
+  std::string room_id;
+  std::string event_type;
+  std::string txn_id;
+  std::string content_json;   // EventResult: invalid -> "No content."
+  std::string sender_user_id; // body.user_id.expect("user is authenticated")
+};
+
+struct CreateMessageEventResponse {
+  std::string event_id;
+};
+
+// NEW in fa322689: GET /_matrix/client/r0/sync (requires auth).
+struct SyncRequest {
+  static constexpr bool REQUIRES_AUTH = true;
+};
+
+struct SyncResponse {
+  std::string joined_room_id;
+  std::vector<std::string> timeline_events;  // canonical PDU JSON
+};
+
 template <typename T>
 struct Ruma {
   T value{};
+  std::optional<std::string> user_id;  // NEW in 533260ed
 
   static Ruma from_request(const httplib::Request& req);
 };
 
-// Result<T, Error>, serialized by respond().
 template <typename T>
 struct MatrixResult {
   std::variant<T, Error> result;
@@ -85,23 +129,24 @@ struct MatrixResult {
   static MatrixResult err(Error e) { return MatrixResult{std::move(e)}; }
 };
 
-struct GetSupportedVersionsResponse {
-  std::vector<std::string> versions;
-  std::map<std::string, std::string> unstable_features;
-};
-
-// The Serialize impls serde would derive:
 json to_json(const RegisterResponse& r);
 json to_json(const LoginResponse& r);
 json to_json(const GetSupportedVersionsResponse& r);
+json to_json(const GetAliasResponse& r);
+json to_json(const JoinRoomByIdResponse& r);
+json to_json(const CreateMessageEventResponse& r);
 json to_error_json(const Error& e);
 
-// The Responder impl Rocket would run (one overload per response type).
+void respond(httplib::Response& res, const json& body, int status = 200);
+
 void respond(httplib::Response& res, const MatrixResult<RegisterResponse>& result);
-void respond(httplib::Response& res,
-             const MatrixResult<CreateMessageEventResponse>& result);
 void respond(httplib::Response& res, const MatrixResult<LoginResponse>& result);
 void respond(httplib::Response& res,
              const MatrixResult<GetSupportedVersionsResponse>& result);
+void respond(httplib::Response& res, const MatrixResult<GetAliasResponse>& result);
+void respond(httplib::Response& res, const MatrixResult<JoinRoomByIdResponse>& result);
+void respond(httplib::Response& res,
+             const MatrixResult<CreateMessageEventResponse>& result);
+void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result);
 
 }  // namespace ruma

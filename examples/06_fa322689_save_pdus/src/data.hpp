@@ -10,6 +10,8 @@
 
 #include "database.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -38,7 +40,13 @@ class Data {
   std::vector<std::string> pdus_all() const;
 
  private:
-  explicit Data(sled::Db db);
+  explicit Data(const std::filesystem::path& dir);
+
+  // OWNERSHIP NOTE (the C++ lesson of this step): Database's trees point into
+  // db_storage_'s column families, so db_storage_ is declared first and never
+  // moves afterwards. Rust makes this impossible to get wrong; C++ encodes it
+  // in declaration order.
   std::string hostname_;
-  sled::Db db_;
+  sled::Db db_storage_;
+  stubdb::Database db_;
 };

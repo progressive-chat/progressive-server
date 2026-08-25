@@ -2,9 +2,8 @@
 //
 //   "$" + base64_url_nopad(sha256(canonical_json(redact(event))))
 //
-// SHA-256 comes from OpenSSL (the parent project already links it); redaction
-// follows the room v1-v4 era algorithm ruma-signatures applied in 2020;
-// canonical JSON = nlohmann sorted-key dump().
+// SHA-256 via OpenSSL; redaction follows the room v1-v4 era algorithm
+// ruma-signatures applied in 2020; canonical JSON = nlohmann sorted dump().
 #pragma once
 
 #include <nlohmann/json.hpp>

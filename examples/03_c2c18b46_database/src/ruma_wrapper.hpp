@@ -96,6 +96,8 @@ json to_json(const LoginResponse& r);
 json to_json(const GetSupportedVersionsResponse& r);
 json to_error_json(const Error& e);
 
+void respond(httplib::Response& res, const json& body, int status = 200);
+
 // The Responder impl Rocket would run (one overload per response type).
 void respond(httplib::Response& res, const MatrixResult<RegisterResponse>& result);
 void respond(httplib::Response& res, const MatrixResult<LoginResponse>& result);

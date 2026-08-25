@@ -1,5 +1,6 @@
 #include "sled.hpp"
 
+#include <memory>
 #include <stdexcept>
 
 namespace sled {
@@ -93,13 +94,15 @@ Db Db::open(const std::filesystem::path& dir) {
     descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions());
   }
 
-  rocksdb::DB* raw = nullptr;
+  rocksdb::DBOptions db_options;
+  db_options.create_if_missing = true;
+
+  std::unique_ptr<rocksdb::DB> db_ptr;
   std::vector<rocksdb::ColumnFamilyHandle*> handles;
-  rocksdb::Options options;
-  options.create_if_missing = true;
-  const rocksdb::Status status =
-      rocksdb::DB::Open(options, dir.string(), descriptors, &handles, &raw);
+  const rocksdb::Status status = rocksdb::DB::Open(
+      db_options, dir.string(), descriptors, &handles, &db_ptr);
   if (!status.ok()) throw std::runtime_error("rocksdb open: " + status.ToString());
+  rocksdb::DB* raw = db_ptr.release();
 
   Db db(raw);
   for (size_t i = 0; i < handles.size(); ++i) {
@@ -121,7 +124,7 @@ Db::~Db() {
   delete db_;
 }
 
-Tree Db::open_tree(const std::string& name) {
+Tree Db::open_tree(const std::string& name) const {
   if (const auto it = cfs_.find(name); it != cfs_.end()) {
     return Tree(db_, it->second);
   }

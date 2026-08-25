@@ -7,6 +7,7 @@
 #include "sled.hpp"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace stubdb {
@@ -16,7 +17,7 @@ class MultiValue {
   explicit MultiValue(sled::Tree tree) : tree_(std::move(tree)) {}
 
   std::vector<std::pair<std::string, std::string>> get_iter(
-      const std::string& id) const;  // values under one id
+      const std::string& id) const;
   void clear(const std::string& id);
   void add(const std::string& id, const std::string& value);
   std::vector<std::pair<std::string, std::string>> iter_all() const {

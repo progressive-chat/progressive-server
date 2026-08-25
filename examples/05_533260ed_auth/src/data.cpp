@@ -66,3 +66,5 @@ void Data::token_replace(const std::string& user_id, const std::string& device_i
   device_token.insert(device_id, token);
   token_user.insert(token, user_id);
 }
+
+Data::Data(sled::Db db) : db_(std::move(db)) {}

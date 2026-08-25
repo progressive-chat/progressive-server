@@ -5,12 +5,12 @@
 namespace crypto {
 
 std::string sha256(const std::string& input) {
-  uint32_t digest[EVP_MAX_MD_SIZE / 4];
+  unsigned char digest[EVP_MAX_MD_SIZE];
   unsigned int length = 0;
   EVP_MD_CTX* ctx = EVP_MD_CTX_new();
   EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
   EVP_DigestUpdate(ctx, input.data(), input.size());
-  EVP_DigestFinal_ex(ctx, reinterpret_cast<unsigned char*>(digest), &length);
+  EVP_DigestFinal_ex(ctx, digest, &length);
   EVP_MD_CTX_free(ctx);
   return std::string(reinterpret_cast<const char*>(digest), length);
 }
@@ -35,7 +35,7 @@ std::string base64_url_nopad(const std::string& raw) {
     const uint32_t byte0 = static_cast<unsigned char>(raw[i]);
     if (i + 1 == raw.size()) {
       out.push_back(kB64[(byte0 >> 2) & 63]);
-      out.push_back(kB64[(byte0 & 3) << 4]);
+      out.push_back(kB64[(byte0 & 3) << 4]);  // no '=' padding
     } else {
       const uint32_t n = (byte0 << 8) | static_cast<unsigned char>(raw[i + 1]);
       out.push_back(kB64[(n >> 10) & 63]);
@@ -47,11 +47,10 @@ std::string base64_url_nopad(const std::string& raw) {
 }
 
 json redact(const json& event) {
-  // Keys kept on every event (room v1-v4 era rules).
-  static const char* kAllowed[] = {"auth_events", "content",     "depth",
-                                   "hashes",      "origin",      "origin_server_ts",
-                                   "prev_events", "prev_state",  "room_id",
-                                   "sender",      "signatures",  "state_key",
+  static const char* kAllowed[] = {"auth_events", "content",    "depth",
+                                   "hashes",      "origin",     "origin_server_ts",
+                                   "prev_events", "prev_state", "room_id",
+                                   "sender",      "signatures", "state_key",
                                    "type",        "event_id"};
   struct ContentRule {
     const char* type;
@@ -77,9 +76,7 @@ json redact(const json& event) {
       for (const ContentRule& rule : kContentRules) {
         if (type != rule.type) continue;
         for (const char* allowed : rule.keys) {
-          if (event["content"].contains(allowed)) {
-            filtered[allowed] = event["content"][allowed];
-          }
+          if (event["content"].contains(allowed)) filtered[allowed] = event["content"][allowed];
         }
       }
       redacted["content"] = std::move(filtered);
@@ -91,7 +88,6 @@ json redact(const json& event) {
 }
 
 std::string reference_hash(const json& event) {
-  // nlohmann objects keep keys sorted => dump() is canonical JSON.
   return "$" + base64_url_nopad(sha256(redact(event).dump()));
 }
 

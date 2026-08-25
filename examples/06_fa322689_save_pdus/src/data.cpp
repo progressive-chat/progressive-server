@@ -5,16 +5,16 @@
 #include <algorithm>
 #include <cstdio>
 
-Data::Data(sled::Db db)
-    : hostname_(db.get_root("hostname").value_or("localhost")), db_(std::move(db)) {}
-
-Data Data::load_or_create(const std::filesystem::path& dir) {
-  return Data(sled::Db::open(dir));
+Data::Data(const std::filesystem::path& dir)
+    : db_storage_(sled::Db::open(dir)), db_(stubdb::Database::open(&db_storage_)) {
+  hostname_ = db_storage_.get_root("hostname").value_or("localhost");
 }
+
+Data Data::load_or_create(const std::filesystem::path& dir) { return Data(dir); }
 
 void Data::set_hostname(const std::string& hostname) {
   hostname_ = hostname;
-  db_.insert_root("hostname", hostname);
+  db_storage_.insert_root("hostname", hostname);
 }
 
 const std::string& Data::hostname() const { return hostname_; }
@@ -23,7 +23,8 @@ bool Data::user_exists(const std::string& user_id) const {
   return db_.userid_password.contains_key(user_id);
 }
 
-void Data::user_add(const std::string& user_id, const std::optional<std::string>& password) {
+void Data::user_add(const std::string& user_id,
+                    const std::optional<std::string>& password) {
   db_.userid_password.insert(user_id, password.value_or(""));
 }
 
@@ -36,12 +37,15 @@ std::optional<std::string> Data::password_get(const std::string& user_id) const 
 }
 
 namespace {
+
+// Devices live as one MultiValue entry per device under the user's id.
 std::vector<std::string> devices_of(const stubdb::MultiValue& mv,
                                     const std::string& user_id) {
   std::vector<std::string> devices;
   for (const auto& [key, value] : mv.get_iter(user_id)) devices.push_back(value);
   return devices;
 }
+
 }  // namespace
 
 void Data::device_add(const std::string& user_id, const std::string& device_id) {
@@ -52,6 +56,7 @@ void Data::device_add(const std::string& user_id, const std::string& device_id) 
 
 void Data::token_replace(const std::string& user_id, const std::string& device_id,
                          const std::string& token) {
+  // debug_assert!(device belongs to user) — checked unconditionally here.
   const auto devices = devices_of(db_.userid_deviceids, user_id);
   if (std::find(devices.begin(), devices.end(), device_id) == devices.end()) {
     std::fprintf(stderr, "[assert] device %s does not belong to %s\n", device_id.c_str(),
@@ -60,11 +65,14 @@ void Data::token_replace(const std::string& user_id, const std::string& device_i
   }
 
   if (const auto old_token = db_.deviceid_token.get(device_id)) {
-    db_.token_userid.erase(*old_token);
+    db_.token_userid.erase(*old_token);  // Remove old token
+    // It will be removed from DEVICEID_TOKEN by the insert below.
   }
-  db_.deviceid_token.insert(device_id, token);
-  db_.token_userid.insert(token, user_id);
+  db_.deviceid_token.insert(device_id, token);  // Assign token to device_id
+  db_.token_userid.insert(token, user_id);      // Assign token to user
 }
+
+// --- PDU graph ------------------------------------------------------------------
 
 std::optional<std::string> Data::pdu_get(const std::string& event_id) const {
   const auto pdu_id = db_.eventid_pduid.get(event_id);
@@ -93,7 +101,9 @@ void Data::pdu_append(const std::string& event_id, const std::string& room_id,
   uint64_t depth = 0;
   for (const auto& prev : prev_events) {
     if (const auto text = pdu_get(prev)) {
-      depth = std::max(depth, json(*text).value("depth", 0ull));
+      depth = std::max(
+          depth,
+          static_cast<uint64_t>(nlohmann::json::parse(*text).value("depth", 0ull)));
     }
   }
   depth += 1;
@@ -101,7 +111,7 @@ void Data::pdu_append(const std::string& event_id, const std::string& room_id,
   event["prev_events"] = prev_events;
   event["origin"] = hostname_;
   event["depth"] = depth;
-  event["auth_events"] = json::array({"$auth_eventid"});            // TODO upstream
+  event["auth_events"] = nlohmann::json::array({"$auth_eventid"});  // TODO upstream
   event["hashes"] = std::string(64, 'A');                           // TODO upstream
   event["signatures"] = "signature";                                // TODO upstream
 
@@ -110,10 +120,11 @@ void Data::pdu_append(const std::string& event_id, const std::string& room_id,
       db_.pduid_pdus.update_and_fetch("n" + room_id, utils::increment);
   const uint64_t index = utils::u64_from_bytes(index_bytes);
 
+  // pdu_id = 'd' + room + '#' + index. Delimiter keeps prefix-sharing rooms apart.
   std::string pdu_id;
   pdu_id.push_back('d');
   pdu_id += room_id;
-  pdu_id.push_back('#');  // delimiter: rooms sharing prefixes stay separate
+  pdu_id.push_back('#');
   pdu_id += std::to_string(index);
 
   const std::string pdu_json = event.dump();  // canonical: sorted keys

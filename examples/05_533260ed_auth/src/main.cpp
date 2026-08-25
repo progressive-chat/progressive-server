@@ -50,6 +50,7 @@ ruma::MatrixResult<ruma::RegisterResponse> register_route(
         .message = "Username was invalid.",
         .status_code = 400,
     });
+  }
   user_id = "@" + localpart + ":" + ctx->data->hostname();
 
   if (ctx->data->user_exists(user_id)) {
@@ -107,8 +108,8 @@ ruma::MatrixResult<ruma::LoginResponse> login_route(Context* ctx,
         .status_code = 400,
     });
   }
-  if (!ctx->data->user_exists(user_id)) {
-
+  // Upstream kept a literal empty `if !data.user_exists(&user_id) {}` here;
+  // password_get below does the real check.
   // Check password — the new thing in 533260ed.
   if (!body.password) {
     return ruma::MatrixResult<ruma::LoginResponse>::err(ruma::Error{

@@ -43,6 +43,7 @@ ruma::MatrixResult<ruma::RegisterResponse> register_route(
         .message = "Username was invalid.",
         .status_code = 400,
     });
+  }
   user_id = "@" + localpart + ":" + ctx->data->hostname();
 
   if (ctx->data->user_exists(user_id)) {
@@ -93,6 +94,12 @@ ruma::MatrixResult<ruma::LoginResponse> login_route(Context* ctx,
     });
   }
   if (!ctx->data->user_exists(user_id)) {
+    return ruma::MatrixResult<ruma::LoginResponse>::err(ruma::Error{
+        .kind = ruma::ErrorKind::Forbidden,
+        .message = "UserId not found.",
+        .status_code = 400,
+    });
+  }
 
   // Password ignored! Any password logs you in at this commit.
   return ruma::MatrixResult<ruma::LoginResponse>::ok(ruma::LoginResponse{

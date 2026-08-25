@@ -67,7 +67,7 @@ class Db {
   Db& operator=(Db&&) = delete;
   ~Db();
 
-  Tree open_tree(const std::string& name);
+  Tree open_tree(const std::string& name) const;
 
   // sled's unnamed root tree.
   void insert_root(const std::string& key, const std::string& value);
@@ -77,7 +77,7 @@ class Db {
   explicit Db(rocksdb::DB* db) : db_(db) {}
 
   rocksdb::DB* db_;
-  std::map<std::string, rocksdb::ColumnFamilyHandle*> cfs_;
+  mutable std::map<std::string, rocksdb::ColumnFamilyHandle*> cfs_;
 };
 
 }  // namespace sled

@@ -108,6 +108,7 @@ void respond(httplib::Response& res, const MatrixResult<RegisterResponse>& resul
 }
 }  // namespace ruma
 
+namespace ruma {
 json to_json(const LoginResponse& r) {
   json out{{"access_token", r.access_token},
            {"device_id", r.device_id},

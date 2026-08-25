@@ -37,14 +37,12 @@ uint64_t millis_since_unix_epoch() {
 
 uint64_t u64_from_bytes(const std::string& bytes) {
   uint64_t number = 0;
-  for (const char b : bytes) {
-    number = (number << 8) | static_cast<unsigned char>(b);
-  }
+  for (const char b : bytes) number = (number << 8) | static_cast<unsigned char>(b);
   return number;
 }
 
 std::string increment(const std::optional<std::string>& old) {
-  const uint64_t number = (old ? utils::u64_from_bytes(*old) : 0) + 1;
+  const uint64_t number = (old ? u64_from_bytes(*old) : 0) + 1;
   std::string out(8, '\0');
   for (int i = 0; i < 8; ++i) {
     out[static_cast<size_t>(i)] =

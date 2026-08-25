@@ -17,7 +17,6 @@ FetchContent_Declare(httplib
   GIT_SHALLOW TRUE
 )
 
-# sled -> RocksDB (the engine conduwuit/tuwunel actually migrated to).
 find_package(RocksDB QUIET)
 if(NOT RocksDB_FOUND)
   set(WITH_GFLAGS OFF CACHE BOOL "" FORCE)
@@ -45,9 +44,10 @@ else()
   set(ROCKSDB_TARGET RocksDB::rocksdb)
 endif()
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
 FetchContent_MakeAvailable(nlohmann_json httplib)
 
-find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(Threads REQUIRED)
 
 add_executable(server

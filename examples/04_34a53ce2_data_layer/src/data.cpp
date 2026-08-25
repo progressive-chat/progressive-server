@@ -20,3 +20,5 @@ void Data::user_add(const std::string& user_id,
                     const std::optional<std::string>& password) {
   db_.open_tree("username_password").insert(user_id, password.value_or(""));
 }
+
+Data::Data(sled::Db db) : db_(std::move(db)) {}

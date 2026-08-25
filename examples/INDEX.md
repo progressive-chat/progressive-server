@@ -18,6 +18,7 @@ used:
 | [sled](https://github.com/spacejam/sled) embedded KV store | **RocksDB** column families behind a thin `src/sled.hpp` adapter (sled's API; RocksDB is what conduwuit migrated to and tuwunel ships) | 3 |
 | ruma-client-api types | hand-written structs in `src/ruma_wrapper.*` (same as upstream's pre-ruma-split layout) | 1 |
 | `ruma_signatures::reference_hash` | OpenSSL SHA-256 + hand-written redaction/base64url (`src/crypto.*`) | 6 |
+| argon2 crate (PHC) | **libargon2** compiled from source (`argon2id_hash_encoded` / `argon2id_verify`) | 7 |
 
 Dependencies are pulled by CMake FetchContent, same style as the parent
 project. If `find_package(RocksDB)` succeeds on your system, no RocksDB build
@@ -33,6 +34,7 @@ is needed.
 | 4 | `34a53ce2` | 2020-03-28 | Better database structure (`data.rs`, hostname) | `04_34a53ce2_data_layer` |
 | 5 | `533260ed` | 2020-03-29 | Add auth (four-tree model, tokens, password check) | `05_533260ed_auth` |
 | 6 | `fa322689` | 2020-04-03 | feat: save pdus (event DAG, reference-hash event ids) | `06_fa322689_save_pdus` |
+| 7 | `fa9e127a` | 2020-04-14 | Store hashed passwords (Argon2id + integration tests) | `07_fa9e127a_store_hashed_passwords` |
 
 Skipped upstream commits (nothing or too little to translate):
 
@@ -44,8 +46,7 @@ Skipped upstream commits (nothing or too little to translate):
   todo!() stubs; folded into steps 5/6
 - Apr 3–10 dummies (`f9cfede2`…`040296c7`) — async migration, PduEvent struct,
   dummy endpoints for Riot compatibility
-- Candidates for a future step 7: `abcce95d` invites/user search (Apr 14),
-  `fa9e127a` hashed passwords (Apr 14)
+- Candidate for a future step 8: `abcce95d` invites/user search (Apr 14)
 
 ## Source file ↔ upstream file mapping
 

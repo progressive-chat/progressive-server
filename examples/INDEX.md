@@ -36,6 +36,7 @@ is needed.
 | 6 | `fa322689` | 2020-04-03 | feat: save pdus (event DAG, reference-hash event ids) | `06_fa322689_save_pdus` |
 | 7 | `fa9e127a` | 2020-04-14 | Store hashed passwords (Argon2id + integration tests) | `07_fa9e127a_store_hashed_passwords` |
 | 8 | `abcce95d` | 2020-04-14 | Invites, room state tree, public directory, user search | `08_abcce95d_invites_user_search` |
+| 9 | `b0d9ccdb` | 2020-04-22 | Signing, basis for federation (Ed25519, X-Matrix) | `09_b0d9ccdb_signing` |
 
 Skipped upstream commits (nothing or too little to translate):
 

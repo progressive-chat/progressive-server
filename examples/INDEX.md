@@ -74,6 +74,7 @@ is needed.
 | 44 | `3e0378755` | 2020-09-16 | Add Complement dockerfile / move sytest dir — CI only, no server change | `44_3e0378755_ci` |
 | 45 | `c1f695653` | 2024-05-02 | feat: support hosting .well-known from Conduit (client + server discovery, default host:443) | `45_c1f695653_wellknown_host` |
 | 46 | `63ba157ef6` | 2024-05-02 | feat(auth): check if X-Matrix destination is correct if present | `46_63ba157ef6_xmatrix_dest` |
+| 47 | `965b6df83d` | 2024-05-02 | fix: make media response match spec (normalise Content-Type to octet-stream, sanitise thumbnails) | `47_965b6df83d_media_contenttype` |
 
 Skipped upstream commits (nothing or too little to translate):
 

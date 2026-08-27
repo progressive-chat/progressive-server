@@ -77,6 +77,7 @@ is needed.
 | 47 | `965b6df83d` | 2024-05-02 | fix: make media response match spec (normalise Content-Type to octet-stream, sanitise thumbnails) | `47_965b6df83d_media_contenttype` |
 | 48 | `1dbb3433e0` | 2024-06-03 | fix(media): use CSP instead of modifying content-type (revert 965b6df83, add global Content-Security-Policy header) | `48_1dbb3433e0_media_csp` |
 | 49 | `27d6d94355` | 2024-08-24 | feat: add support for authenticated media requests (MSC3916 client v1 media endpoints, auth-gated) | `49_27d6d94355_authenticated_media` |
+| 50 | `a6797ca0a2` | 2024-09-21 | fix: add missing msc3916 unstable feature in version response | `50_a6797ca0a2_versions_msc3916` |
 
 Skipped upstream commits (nothing or too little to translate):
 

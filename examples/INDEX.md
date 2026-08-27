@@ -79,6 +79,7 @@ is needed.
 | 49 | `27d6d94355` | 2024-08-24 | feat: add support for authenticated media requests (MSC3916 client v1 media endpoints, auth-gated) | `49_27d6d94355_authenticated_media` |
 | 50 | `a6797ca0a2` | 2024-09-21 | fix: add missing msc3916 unstable feature in version response | `50_a6797ca0a2_versions_msc3916` |
 | 51 | `1fc82477c5` | 2025-05-12 | chore(/versions): declare support for matrix <= v1.12 | `51_1fc82477c5_versions_v112` |
+| 52 | `3248efbe4b` | 2025-06-22 | fix(registration): enforce the strict user ID grammar | `52_3248efbe4b_register_grammar` |
 
 Skipped upstream commits (nothing or too little to translate):
 

@@ -76,6 +76,7 @@ is needed.
 | 46 | `63ba157ef6` | 2024-05-02 | feat(auth): check if X-Matrix destination is correct if present | `46_63ba157ef6_xmatrix_dest` |
 | 47 | `965b6df83d` | 2024-05-02 | fix: make media response match spec (normalise Content-Type to octet-stream, sanitise thumbnails) | `47_965b6df83d_media_contenttype` |
 | 48 | `1dbb3433e0` | 2024-06-03 | fix(media): use CSP instead of modifying content-type (revert 965b6df83, add global Content-Security-Policy header) | `48_1dbb3433e0_media_csp` |
+| 49 | `27d6d94355` | 2024-08-24 | feat: add support for authenticated media requests (MSC3916 client v1 media endpoints, auth-gated) | `49_27d6d94355_authenticated_media` |
 
 Skipped upstream commits (nothing or too little to translate):
 

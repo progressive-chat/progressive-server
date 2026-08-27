@@ -73,6 +73,7 @@ is needed.
 | 43 | `a567cd81d` | 2020-09-16 | improvement: better logs on federation deserialization errors | `43_a567cd81d_logs` |
 | 44 | `3e0378755` | 2020-09-16 | Add Complement dockerfile / move sytest dir — CI only, no server change | `44_3e0378755_ci` |
 | 45 | `c1f695653` | 2024-05-02 | feat: support hosting .well-known from Conduit (client + server discovery, default host:443) | `45_c1f695653_wellknown_host` |
+| 46 | `63ba157ef6` | 2024-05-02 | feat(auth): check if X-Matrix destination is correct if present | `46_63ba157ef6_xmatrix_dest` |
 
 Skipped upstream commits (nothing or too little to translate):
 

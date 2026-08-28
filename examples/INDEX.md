@@ -84,6 +84,7 @@ is needed.
 | 54 | `bc5145f092` | 2025-07-24 | feat(client-api): support format query parameter for GET /state/ | `54_bc5145f092_state_format` |
 | 55 | `8def22bfb8` | 2026-03-05 | feat: add user agent string to federation requests | `55_8def22bfb8_fed_user_agent` |
 | 56 | `82b7cf6261` | 2025-12-30 | fix: leave member event carries client-supplied reason | `56_82b7cf6261_leave_reason` |
+| 57 | `346913268f` | 2025-12-30 | fix: don't ignore content of membership template (invite reason) | `57_346913268f_invite_reason` |
 
 Skipped upstream commits (nothing or too little to translate):
 

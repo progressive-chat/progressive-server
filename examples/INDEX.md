@@ -87,6 +87,7 @@ is needed.
 | 57 | `346913268f` | 2025-12-30 | fix: don't ignore content of membership template (invite reason) | `57_346913268f_invite_reason` |
 | 58 | `11a9d053b0` | 2025-06-14 | feat: rate-limiting (per-action sliding-window, M_LIMIT_EXCEEDED) | `58_11a9d053b0_rate_limiting` |
 | 59 | `a888c7cb16` | 2024-05-27 | feat: implement OpenID request_token endpoint (+ token storage; also enforces requesting user == sender per 08366bf28b) | `59_a888c7cb16_openid` |
+| 60 | `9db1f5a13c` | 2024-05-02 | feat: admin subsystem (core `/_conduit/admin/*` routes) + fix: reject creation of remote users | `60_9db1f5a13c_admin` |
 
 Skipped upstream commits (nothing or too little to translate):
 

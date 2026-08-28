@@ -81,6 +81,7 @@ is needed.
 | 51 | `1fc82477c5` | 2025-05-12 | chore(/versions): declare support for matrix <= v1.12 | `51_1fc82477c5_versions_v112` |
 | 52 | `3248efbe4b` | 2025-06-22 | fix(registration): enforce the strict user ID grammar | `52_3248efbe4b_register_grammar` |
 | 53 | `a87f4b6171` | 2025-07-04 | fix: respond with HTTP 413 when request size is too big | `53_a87f4b6171_req_size_413` |
+| 54 | `bc5145f092` | 2025-07-24 | feat(client-api): support format query parameter for GET /state/ | `54_bc5145f092_state_format` |
 
 Skipped upstream commits (nothing or too little to translate):
 

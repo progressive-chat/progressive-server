@@ -1024,10 +1024,9 @@ svr.Post(R"(/_matrix/client/r0/rooms/(.+)/upgrade)",
 
               // Update the create_content with the actual tombstone_id
               create_content["predecessor"] = json{{"room_id", old_room}, {"event_id", tombstone_id}};
-              create_content["predecessor"] = json{{"room_id", old_room}, {"event_id", tombstone_id}};
 
               // Create the new room's m.room.create event
-append(new_room, "m.room.create", create_content, "", sender);
+              append(new_room, "m.room.create", create_content, "", sender);
 
               // Sender joins the new room.
               if (!data->room_join(new_room, sender)) {

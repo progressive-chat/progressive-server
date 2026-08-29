@@ -52,8 +52,9 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
                     sled::Tree ro,
                     sled::Tree ti,
                      sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
-                    sled::Tree rs2, sled::Tree ot, sled::Tree au)
-      : userid_password(std::move(up)),
+                     sled::Tree rs2, sled::Tree ot, sled::Tree au,
+                     sled::Tree userroomid_knockstate, sled::Tree roomuserid_knockcount)
+       : userid_password(std::move(up)),
       userid_deviceids(std::move(ud)),
       userdeviceid_token(std::move(ut)),
       token_userid(std::move(tu)),
@@ -80,7 +81,9 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
        backup_latest(std::move(bl)),
        roomserverids(std::move(rs2)),
        openidtoken_userid(std::move(ot)),
-       admin_users(std::move(au)) {}
+        admin_users(std::move(au)),
+        userroomid_knockstate(std::move(userroomid_knockstate)),
+        roomuserid_knockcount(std::move(roomuserid_knockcount)) {}
 
 Database Database::open(sled::Db* db) {
   return Database(db->open_tree("userid_password"),
@@ -110,7 +113,9 @@ Database Database::open(sled::Db* db) {
                   db->open_tree("backup_latest"),
                    db->open_tree("roomserverids"),
                    db->open_tree("openidtoken_userid"),
-                   db->open_tree("admin_users"));
+                   db->open_tree("admin_users"),
+                   db->open_tree("userroomid_knockstate"),
+                   db->open_tree("roomuserid_knockcount"));
 }
 
 }  // namespace database

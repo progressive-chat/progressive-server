@@ -239,6 +239,18 @@ class Data {
   // event); an admin can later resolve it by inviting the user.
   bool room_knock(const std::string& room_id, const std::string& user_id,
                   const std::string& reason = "");
+  // NEW in 21af83e: state-cache knock tracking (mirrors Conduit's
+  // userroomid_knockstate / roomuserid_knockcount trees).
+  void mark_as_knocked(const std::string& user_id, const std::string& room_id,
+                        const std::string& knock_event_json);
+  std::optional<uint64_t> get_knock_count(const std::string& room_id,
+                                          const std::string& user_id) const;
+  // Returns pairs of (room_id, knock_event_json) for rooms the user knocked.
+  std::vector<std::pair<std::string, std::string>> rooms_knocked(
+      const std::string& user_id) const;
+  std::optional<std::string> knock_state(const std::string& user_id,
+                                         const std::string& room_id) const;
+  bool is_knocked(const std::string& user_id, const std::string& room_id) const;
   std::vector<std::string> rooms_invited(const std::string& user_id) const;
 
  private:

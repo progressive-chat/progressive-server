@@ -14,6 +14,7 @@ uint64_t millis_since_unix_epoch();
 
 // NEW in fa322689:
 uint64_t u64_from_bytes(const std::string& bytes);             // u64::from_be_bytes
+std::string u64_to_bytes(uint64_t number);                     // u64::to_be_bytes
 std::string increment(const std::optional<std::string>& old);  // be counter + 1
 
 // NEW in fa9e127a (utils.rs):

@@ -24,6 +24,8 @@
 #include "admin.hpp"
 #include "data.hpp"
 #include "ruma_wrapper.hpp"
+#include "rooms_helpers.hpp"
+#include "rooms_alias.hpp"
 #include "argon2.h"
 #include "utils.hpp"
 
@@ -357,7 +359,9 @@ ruma::MatrixResult<ruma::PublicRoomsResponse> get_public_rooms_filtered_route(
 // 9c26e22a/3aa0c8ed: aliases resolved from the database.
 ruma::MatrixResult<ruma::GetAliasResponse> get_alias_route(
     Context* ctx, const std::string& room_alias) {
-  auto room_id = ctx->data->id_from_alias(room_alias);
+  // NEW in 21af83e: alias resolution is delegated to the rooms/alias service
+  // helper (mirrors Conduit's get_alias_helper relocation).
+  auto room_id = rooms_alias::get_alias_helper(ctx->data, room_alias);
   if (!room_id) {
     std::cerr << "[debug] Room alias not found.\n";
     return ruma::MatrixResult<ruma::GetAliasResponse>::err(ruma::Error{
@@ -513,6 +517,18 @@ ruma::MatrixResult<ruma::SyncResponse> sync_route(Context* ctx,
       invited.stripped_state.push_back(pdu_text);
     }
     resp.invited.emplace(room_id, std::move(invited));
+  }
+
+  // NEW in 21af83e: knocked rooms surface the stored knock state event. The
+  // knock count acts as the incremental `since` cursor (mirrors Conduit's
+  // get_knock_count vs sync `since` check).
+  for (const auto& [room_id, knock_json] : ctx->data->rooms_knocked(user_id)) {
+    const auto count = ctx->data->get_knock_count(room_id, user_id);
+    if (count && since >= *count) continue;  // already synced this knock
+    ruma::SyncResponse knocked;
+    knocked.joined_room_id = room_id;
+    knocked.stripped_state.push_back(knock_json);
+    resp.knocked.emplace(room_id, std::move(knocked));
   }
 
   return ruma::MatrixResult<ruma::SyncResponse>::ok(std::move(resp));
@@ -1118,13 +1134,16 @@ int main(int argc, char** argv) {
                 return;
               }
 
-              if (!ctx.data->room_join(room_id, *user)) {
-               ruma::respond(res,
-                             nlohmann::json{{"errcode", "M_FORBIDDEN"},
-                                            {"error", "event not authorized"}},
-                             403);
-               return;
-             }
+              // NEW in 21af83e: local join is delegated to the rooms/helpers
+              // service (mirrors Conduit's join_room_by_id local branch).
+              std::string join_err;
+              if (!rooms_helpers::join_room_by_id(ctx.data, *user, room_id, "", join_err)) {
+                ruma::respond(res,
+                              nlohmann::json{{"errcode", "M_FORBIDDEN"},
+                                             {"error", join_err.empty() ? "event not authorized" : join_err}},
+                              403);
+                return;
+              }
 
              nlohmann::json content = {{"membership", "join"}};
              if (auto dn = ctx.data->displayname_get(*user))
@@ -2328,6 +2347,77 @@ int main(int argc, char** argv) {
             ruma::respond(res,
                           ruma::json{{"auth_chain", auth_chain}, {"state", state}},
                           200);
+          });
+
+  // NEW in 21af83e: federation knock handshake. `make_knock` returns an unsigned
+  // knock template for the remote to sign; `send_knock` accepts the signed
+  // knock event and appends it (the knock auth branch in pdu_append permits it).
+  svr.Get(R"(/_matrix/federation/v1/make_knock/([^/]+)/([^/]+))",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+            const std::string room_id = url_decode(req.matches[1]);
+            const std::string user_id = url_decode(req.matches[2]);
+            if (ctx.data->room_state(room_id).empty()) {
+              ruma::respond(res,
+                            ruma::json{{"errcode", "M_NOT_FOUND"},
+                                       {"error", "Room not found."}},
+                            404);
+              return;
+            }
+            // Adapted: we don't track per-room versions, so report a default.
+            nlohmann::json event = {
+                {"type", "m.room.member"},
+                {"content", {{"membership", "knock"}}},
+                {"room_id", room_id},
+                {"sender", user_id},
+                {"state_key", user_id},
+            };
+            ruma::respond(res,
+                          ruma::json{{"room_version", "1"}, {"event", std::move(event)}},
+                          200);
+          });
+
+  svr.Put(R"(/_matrix/federation/v1/send_knock/([^/]+)/([^/]+))",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+            const std::string room_id = url_decode(req.matches[1]);
+            json body = json::object();
+            try { body = json::parse(req.body); } catch (...) {}
+            json pdu = body.contains("pdu") ? body["pdu"] : body;
+            if (!pdu.is_object() || !pdu.contains("room_id")) {
+              ruma::respond(res, ruma::json{{"errcode", "M_BAD_JSON"},
+                                            {"error", "missing pdu"}}, 400);
+              return;
+            }
+            const std::string sender = pdu.value("sender", "");
+            const std::string state_key = pdu.value("state_key", sender);
+            json content = pdu.value("content", json::object());
+            json event = {
+                {"type", "m.room.member"},
+                {"content", content},
+                {"event_id", "$thiswillbefilledinlater"},
+                {"origin_server_ts", utils::millis_since_unix_epoch()},
+                {"room_id", room_id},
+                {"sender", sender},
+                {"state_key", state_key},
+                {"unsigned", json::object()},
+            };
+            const std::string event_id = crypto::reference_hash(event);
+            event["event_id"] = event_id;
+            if (!ctx.data->pdu_append(event_id, room_id, std::move(event))) {
+              ruma::respond(res, ruma::json{{"errcode", "M_FORBIDDEN"},
+                                            {"error", "event not authorized"}}, 403);
+              return;
+            }
+            // Surface the knock in the state cache for /sync.
+            nlohmann::json knock_stored = {
+                {"type", "m.room.member"},
+                {"state_key", state_key},
+                {"content", content},
+                {"event_id", event_id},
+                {"room_id", room_id},
+                {"sender", sender},
+            };
+            ctx.data->mark_as_knocked(state_key, room_id, knock_stored.dump());
+            ruma::respond(res, ruma::json{{"knock_room_state", json::array()}}, 200);
           });
 
   svr.Get(R"(/_matrix/federation/v1/state_ids/([^/]+)/([^/]+))",

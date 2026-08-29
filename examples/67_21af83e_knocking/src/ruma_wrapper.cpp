@@ -242,6 +242,24 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
   for (const auto& [room_id, room] : r.invited)
     if (!room.stripped_state.empty()) invite[room_id] = invited_room_json(room);
 
+  // NEW in 21af83e: knocked rooms surface the stored knock state event.
+  auto knocked_room_json = [](const SyncResponse& room) {
+    json events = json::array();
+    for (const auto& pdu : room.stripped_state) {
+      auto full = json::parse(pdu);
+      events.push_back({
+          {"content", full.value("content", json::object())},
+          {"sender", full.value("sender", "")},
+          {"state_key", full.value("state_key", "")},
+          {"type", full.value("type", "")},
+      });
+    }
+    return json{{"knock_state", {{"events", std::move(events)}}}};
+  };
+  json knock = json::object();
+  for (const auto& [room_id, room] : r.knocked)
+    if (!room.stripped_state.empty()) knock[room_id] = knocked_room_json(room);
+
   // Always use the modern multi-room shape; an empty account yields empty maps.
   if (true) {
     json out = {
@@ -249,6 +267,7 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
         {"rooms",
          {{"invite", std::move(invite)},
           {"join", std::move(join)},
+          {"knock", std::move(knock)},
           {"leave", json::object()}}},
         {"to_device", {{"events", json::array()}}},
     };

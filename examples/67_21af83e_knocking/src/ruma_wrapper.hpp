@@ -120,6 +120,7 @@ struct SyncResponse {
   bool limited = false;    // NEW in b4d65ab6: true on a room's first sync
   std::map<std::string, SyncResponse> joined;
   std::map<std::string, SyncResponse> invited;
+  std::map<std::string, SyncResponse> knocked;  // NEW in 21af83e: knocked rooms
   std::vector<std::string> stripped_state;
 };
 

@@ -169,13 +169,60 @@ bool Data::displayname_set(const std::string& user_id,
         {"room_id", room_id},
         {"sender", user_id},
         {"state_key", user_id},
-        {"unsigned", nlohmann::json::object()},
-    };
+       {"unsigned", nlohmann::json::object()},
+  };
     const std::string event_id = crypto::reference_hash(event);
     event["event_id"] = event_id;
     return pdu_append(event_id, room_id, std::move(event));
   }
   return true;
+}
+
+// --- NEW in 21af83e: state-cache knock tracking -------------------------------
+
+void Data::mark_as_knocked(const std::string& user_id, const std::string& room_id,
+                            const std::string& knock_event_json) {
+  const std::string userroom_key = user_id + '\xff' + room_id;
+  const std::string roomuser_key = room_id + '\xff' + user_id;
+  db_.userroomid_knockstate.insert(userroom_key, knock_event_json);
+  // Increment knock count (big-endian counter, like Conduit's next_count).
+  uint64_t count = 0;
+  if (auto existing = db_.roomuserid_knockcount.get(roomuser_key))
+    count = utils::u64_from_bytes(*existing);
+  ++count;
+  db_.roomuserid_knockcount.insert(roomuser_key, utils::u64_to_bytes(count));
+  // A knock clears any prior "left" membership marker for this user in the room.
+  db_.userid_leftroomids.remove_value(user_id, room_id);
+}
+
+std::optional<uint64_t> Data::get_knock_count(const std::string& room_id,
+                                              const std::string& user_id) const {
+  const std::string key = room_id + '\xff' + user_id;
+  if (auto bytes = db_.roomuserid_knockcount.get(key))
+    return utils::u64_from_bytes(*bytes);
+  return std::nullopt;
+}
+
+std::vector<std::pair<std::string, std::string>> Data::rooms_knocked(
+    const std::string& user_id) const {
+  std::vector<std::pair<std::string, std::string>> out;
+  for (const auto& [key, value] : db_.userroomid_knockstate.scan_prefix(user_id + '\xff')) {
+    // key = user_id + 0xff + room_id
+    const std::string room_id = key.substr(user_id.size() + 1);
+    out.emplace_back(room_id, value);
+  }
+  return out;
+}
+
+std::optional<std::string> Data::knock_state(const std::string& user_id,
+                                             const std::string& room_id) const {
+  const std::string key = user_id + '\xff' + room_id;
+  if (auto v = db_.userroomid_knockstate.get(key)) return *v;
+  return std::nullopt;
+}
+
+bool Data::is_knocked(const std::string& user_id, const std::string& room_id) const {
+  return db_.userroomid_knockstate.contains_key(user_id + '\xff' + room_id);
 }
 
 void Data::displayname_remove(const std::string& user_id) {
@@ -220,9 +267,14 @@ void Data::token_replace(const std::string& user_id, const std::string& device_i
 
 // --- membership ----------------------------------------------------------------
 
-bool Data::room_join(const std::string& room_id, const std::string& user_id) {
+ bool Data::room_join(const std::string& room_id, const std::string& user_id) {
   db_.roomid_userids.add(room_id, user_id);
   db_.userid_roomids.add(user_id, room_id);
+
+  // NEW in 21af83e: joining clears any prior knock state for this room.
+  db_.userroomid_knockstate.erase(user_id + '\xff' + room_id);
+  db_.roomuserid_knockcount.erase(room_id + '\xff' + user_id);
+
 
   // NEW in df55e8ed: remember that this user has once joined (used to carry
   // account data / membership across a room upgrade's predecessor).
@@ -311,7 +363,21 @@ bool Data::room_knock(const std::string& room_id, const std::string& user_id,
   };
   const std::string event_id = crypto::reference_hash(event);
   event["event_id"] = event_id;
-  return pdu_append(event_id, room_id, std::move(event));
+  const bool ok = pdu_append(event_id, room_id, std::move(event));
+  if (ok) {
+    // NEW in 21af83e: also record knock state in the state cache so the knock
+    // can be surfaced in /sync and resolved by an admin invite.
+    nlohmann::json stored = {
+        {"type", "m.room.member"},
+        {"state_key", user_id},
+        {"content", {{"membership", "knock"}, {"reason", reason}}},
+        {"event_id", event_id},
+        {"room_id", room_id},
+        {"sender", user_id},
+    };
+    mark_as_knocked(user_id, room_id, stored.dump());
+  }
+  return ok;
 }
 
 /// NEW in b106d139: database/users.rs remove_device, adapted to our token-
@@ -1102,6 +1168,10 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   const std::string event_id = crypto::reference_hash(event);
   event["event_id"] = event_id;
   pdu_append(event_id, room_id, std::move(event));
+
+  // NEW in 21af83e: resolving a knock (by invite) clears the knock state.
+  db_.userroomid_knockstate.erase(user_id + '\xff' + room_id);
+  db_.roomuserid_knockcount.erase(room_id + '\xff' + user_id);
 
   db_.userid_inviteroomids.add(user_id, room_id);
   return true;

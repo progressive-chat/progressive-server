@@ -65,7 +65,11 @@ class Database {
   Media media;                     // NEW in 821c608c: media repository
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
   sled::Tree openidtoken_userid;   // NEW in a888c7cb16: OpenID token -> (expires_at, user_id)
-  sled::Tree admin_users;          // NEW in 9db1f5a13c-era: admin user_id -> ""
+  sled::Tree admin_users;        // NEW in 9db1f5a13c-era: admin user_id -> ""
+  // NEW in 21af83e: knock state / count — mirror Conduit's userroomid_knockstate
+  // and roomuserid_knockcount trees.
+  sled::Tree userroomid_knockstate;  // user+0xff+room -> knock m.room.member event json
+  sled::Tree roomuserid_knockcount;  // room+0xff+user -> count (for sync since)
 
   private:
   Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
@@ -77,7 +81,8 @@ class Database {
             sled::Tree ro,
             sled::Tree ti,
             sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
-           sled::Tree rs2, sled::Tree ot, sled::Tree au);
+           sled::Tree rs2, sled::Tree ot, sled::Tree au,
+           sled::Tree userroomid_knockstate, sled::Tree roomuserid_knockcount);
 };
 
 }  // namespace database

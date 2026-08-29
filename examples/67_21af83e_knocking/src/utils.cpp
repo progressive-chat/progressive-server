@@ -47,6 +47,14 @@ uint64_t u64_from_bytes(const std::string& bytes) {
   return number;
 }
 
+std::string u64_to_bytes(uint64_t number) {
+  std::string out(8, '\0');
+  for (int i = 0; i < 8; ++i)
+    out[static_cast<size_t>(i)] =
+        static_cast<char>((number >> ((7 - i) * 8)) & 0xFF);
+  return out;
+}
+
 std::string increment(const std::optional<std::string>& old) {
   const uint64_t number = (old ? u64_from_bytes(*old) : 0) + 1;
   std::string out(8, '\0');

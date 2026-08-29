@@ -82,6 +82,8 @@ add_library(conduit_core STATIC
   src/media.cpp
   src/rate_limiting.cpp
   src/admin.cpp
+  src/rooms_helpers.cpp
+  src/rooms_alias.cpp
 )
 target_compile_definitions(conduit_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(conduit_core PUBLIC

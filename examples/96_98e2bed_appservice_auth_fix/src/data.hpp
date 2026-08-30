@@ -103,6 +103,10 @@ class Data {
   std::optional<nlohmann::json> appservice_by_id(const std::string& id) const;
   /// Resolve an appservice hs_token (used as the request bearer) to its id.
   std::optional<std::string> appservice_id_from_token(const std::string& token) const;
+  /// NEW in 6e5b35ea: iterate all registered appservices (as JSON objects
+  /// with id, url, hs_token, sender). Used to dispatch events to bridges
+  /// whose namespace matches the event's sender.
+  std::vector<nlohmann::json> appservice_all() const;
 
   // --- membership (folded prerequisite) --------------------------------------
   /// b6c0e9bf: appends the join member event; trees updated post-auth.

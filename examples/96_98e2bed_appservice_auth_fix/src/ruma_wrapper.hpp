@@ -47,6 +47,10 @@ struct RegisterRequest {
   std::optional<std::string> username;
   std::optional<std::string> password;
   std::optional<std::string> device_id;
+  // NEW in 6e5b35ea: appservice bridges set this to true to bypass the
+  // UIAA flow and create ghost users directly. The request must be
+  // authenticated via the appservice's hs_token.
+  bool from_appservice = false;
 };
 
 struct RegisterResponse {
@@ -152,6 +156,10 @@ struct CreateRoomRequest {
   // NEW in 660dd9c: room version to use for the new room
   std::optional<std::string> room_version;
   std::string user_id;  // resolved from token
+  // NEW in 6e5b35ea: appservice bridges set this to true to create rooms
+  // for their portals. The request must be authenticated via the
+  // appservice's hs_token.
+  bool from_appservice = false;
 };
 
 // NEW in 3aa0c8ed: PUT /directory/room/<alias>

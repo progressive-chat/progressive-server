@@ -1,17 +1,21 @@
-# Step 22 — "feat: implement /event" (Conduit `469071e1`, 2020-07-11, PR #144)
+# Step 27 — "improvement: add remaining key backup endpoints" (Conduit `3f4cb753`)
 
-Source: [`timokoesters/conduit@469071e1`](https://github.com/timokoesters/conduit/commit/469071e1)
+Source: [`timokoesters/conduit@3f4cb753`](https://github.com/timokoesters/conduit/commit/3f4cb753) (2020-08-27)
 
-## What changed vs step 21
+## What changed vs step 26
 
 | Rust change | C++ translation |
 |---|---|
-| `GET /rooms/<id>/event/<event_id>` — joined membership required, returns the raw stored PDU; missing → M_NOT_FOUND "Event not found." | identical, via existing `Data::pdu_get` (eventid_pduid → pduid_pdus lookup from step 6) |
+| Adds 10+ REST endpoints for `/room_keys/...` plus the full `Data::backup_*` helper set. | Translated to C++ with the same wire shape and behavior. |
 
-## Verified
+## Implementation details
 
-```
-joined user GET event   → 200 full signed PDU JSON
-non-member GET event    → 403 You don't have permission
-nonexistent event       → 404 M_NOT_FOUND
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```

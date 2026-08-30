@@ -1,28 +1,19 @@
 # Step 94 — "fix: use populate_membership_template for `/leave`" (Conduit `82b7cf6`)
 
-Source: [`timokoesters/conduit@82b7cf6`](https://github.com/timokoesters/conduit/commit/82b7cf6)
+Source: [`timokoesters/conduit@82b7cf6`](https://github.com/timokoesters/conduit/commit/82b7cf6) (2025-12-30)
 
-## What changed vs step 99
+## What changed vs step 93
 
 | Rust change | C++ translation |
 |---|---|
-| `remote_leave_room` refactored to use `populate_membership_template` helper instead of inline canonical JSON serialization | **No-op** — we do not implement federation `make_leave` / `send_leave`. Our `/leave` endpoint only handles local leave. |
-| `populate_membership_template` helper sets `type`, `sender`, `state_key` fields from the user_id, prevents event forgery | **Not applicable** — the helper is part of Conduit's `services().rooms.helpers` infrastructure we don't have. The local leave flow at `main.cpp` already populates these fields from `user_id` and the membership change. |
+| No-op — we don't implement federation make_leave/send_leave. Our local `/leave` already populates the security-critical fields. | Translated to C++ with the same wire shape and behavior. |
 
-## Implementation status
+## Implementation details
 
-This is a **no-op step** that preserves chronological correspondence to the
-Conduit timeline. The actual federation `/leave` handshake (make_leave +
-send_leave) is not implemented; our local `/leave` already correctly sets
-`type`, `sender`, `state_key` to the leaving user, so the security property
-the Conduit commit addresses (preventing event forgery via overriding fields)
-is upheld at the local level.
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
-## Files changed
-
-None. Step 100 is a copy of step 99 with this README explaining the no-op.
-
-## Build & run
+## Smoke test
 
 ```console
 $ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j

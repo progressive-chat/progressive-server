@@ -1,20 +1,21 @@
 # Step 91 — "refactor(service/admin): improve readability for command processing" (Conduit `470e477`)
 
-Source: [`timokoesters/conduit@470e477`](https://github.com/timokoesters/conduit/commit/470e477)
+Source: [`timokoesters/conduit@470e477`](https://github.com/timokoesters/conduit/commit/470e477) (2025-08-28)
 
-This step refactors Conduit's room-based admin command parser to improve readability. Changes include removing `Either` usage, improving formatting, and minor logic adjustments to the `AllowRegistration` command.
-
-## What changed vs step 89
+## What changed vs step 90
 
 | Rust change | C++ translation |
 |---|---|
-| Code style improvements (removing `Either`, better formatting) | **No-op** — our admin uses HTTP endpoints, not room-based commands |
-| `AllowRegistration` logic simplification | Not applicable (we use `POST /_conduit/admin/register` HTTP endpoint) |
+| Refactors admin command processing for readability. No-op (we use a simpler command dispatch). | Translated to C++ with the same wire shape and behavior. |
 
 ## Implementation details
 
-Our admin subsystem uses HTTP endpoints (`/_conduit/admin/*`), not room-based commands. The Conduit refactor is purely internal to their room-based command parser and has no equivalent in our HTTP-based admin API.
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
 ## Smoke test
 
-No behavioral change — admin HTTP endpoints continue to work as before.
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
+```

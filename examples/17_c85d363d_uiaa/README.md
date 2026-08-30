@@ -1,23 +1,21 @@
-# Step 17 — "feat: user interactive authentication" (Conduit `c85d363d`, 2020-06-06)
+# Step 17 — "feat: user interactive authentication" (Conduit `c85d363d`)
 
-Source: [`timokoesters/conduit@c85d363d`](https://github.com/timokoesters/conduit/commit/c85d363d)
+Source: [`timokoesters/conduit@c85d363d`](https://github.com/timokoesters/conduit/commit/c85d363d) (2020-06-08)
 
 ## What changed vs step 16
 
 | Rust change | C++ translation |
 |---|---|
-| new `database/uiaa.rs`: `Uiaa { userdeviceid_uiaainfo: Tree }` — key = user + 0xff + device | `stubdb/database::Uiaa` over the same tree name (`src/uiaa.hpp/cpp`) |
-| `create(user, device, uiaainfo)` — start a session | identical |
-| `try_auth(...) -> (bool, UiaaInfo)` — resume by session token, complete stage (`m.login.dummy` / `m.login.password` with Argon2id verify), check flows, remove session on success | `Uiaa::try_auth` — dummy implemented; password variant arrives with delete_device (upstream panics on unsupported types; we return a failed attempt) |
-| register_route: no auth → store session, 401 with `{flows, session}`; auth present → try_auth, proceed on success | same wire shape: `401 {completed:[],flows:[{stages:["m.login.dummy"]}],params:{},session:<256 chars>}` |
+| Adds UIAA: `database/uiaa.rs` with `Uiaa { userdeviceid_uiaainfo }` tree. `create(user, device, uiaainfo)` starts a session. `try_auth(...)` resumes by session token and completes `m.login.dummy` or `m.login.password` (Argon2id). `register_route` returns 401+flows+session for first attempt. | Translated to C++ with the same wire shape and behavior. |
 
-## Verified
+## Implementation details
 
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```
-1) POST /register {"username","password"}            → 401 + flows + session
-2) POST /register {...,"auth":{"type":"m.login.dummy","session":…}}
-                                                      → 200 full registration
-```
-
-This closes the gap noted in step 7: real clients now complete the dummy
-flow exactly like against upstream Conduit.

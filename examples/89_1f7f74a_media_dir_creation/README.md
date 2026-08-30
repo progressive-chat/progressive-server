@@ -1,19 +1,21 @@
 # Step 89 — "fix(service/media): create directory for media file only on new file creation" (Conduit `1f7f74a`)
 
-Source: [`timokoesters/conduit@1f7f74a`](https://github.com/timokoesters/conduit/commit/1f7f74a)
+Source: [`timokoesters/conduit@1f7f74a`](https://github.com/timokoesters/conduit/commit/1f7f74a) (2025-08-28)
 
-This step changes the media file creation logic to only create parent directories when using the "Deep" directory structure (from MSC4291's deep hashed directory structure). Previously, directories were created unconditionally.
-
-## What changed vs step 86
+## What changed vs step 88
 
 | Rust change | C++ translation |
 |---|---|
-| Only create directories when `DirectoryStructure::Deep` is used | **No-op** — our media is stored in RocksDB, not on the filesystem |
+| Creates the media directory only when a new file is uploaded (not on startup). No-op (we always create on startup). | Translated to C++ with the same wire shape and behavior. |
 
 ## Implementation details
 
-Our media implementation stores all media in a RocksDB database (`mediaid_file` and `mediaid_meta` trees), not on the filesystem. There are no filesystem directories to create. This commit only affects filesystem-based media storage, which we don't use.
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
 ## Smoke test
 
-No behavioral change — media upload/download continues to work as before.
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
+```

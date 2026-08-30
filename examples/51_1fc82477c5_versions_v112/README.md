@@ -1,17 +1,21 @@
-# Step 22 — "feat: implement /event" (Conduit `469071e1`, 2020-07-11, PR #144)
+# Step 51 — "chore(/versions): declare support for matrix <= v1.12" (Conduit `1fc82477c5`)
 
-Source: [`timokoesters/conduit@469071e1`](https://github.com/timokoesters/conduit/commit/469071e1)
+Source: [`timokoesters/conduit@1fc82477c5`](https://github.com/timokoesters/conduit/commit/1fc82477c5) (2025-05-12)
 
-## What changed vs step 21
+## What changed vs step 50
 
 | Rust change | C++ translation |
 |---|---|
-| `GET /rooms/<id>/event/<event_id>` — joined membership required, returns the raw stored PDU; missing → M_NOT_FOUND "Event not found." | identical, via existing `Data::pdu_get` (eventid_pduid → pduid_pdus lookup from step 6) |
+| Adds `v1.12` to the `versions` response list. | Translated to C++ with the same wire shape and behavior. |
 
-## Verified
+## Implementation details
 
-```
-joined user GET event   → 200 full signed PDU JSON
-non-member GET event    → 403 You don't have permission
-nonexistent event       → 404 M_NOT_FOUND
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```

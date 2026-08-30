@@ -1,17 +1,21 @@
-# Step 22 — "feat: implement /event" (Conduit `469071e1`, 2020-07-11, PR #144)
+# Step 41 — "fix: server keys and destination resolution when server name contains port" (Conduit `dd749b8ae`)
 
-Source: [`timokoesters/conduit@469071e1`](https://github.com/timokoesters/conduit/commit/469071e1)
+Source: [`timokoesters/conduit@dd749b8ae`](https://github.com/timokoesters/conduit/commit/dd749b8ae) (2020-09-16)
 
-## What changed vs step 21
+## What changed vs step 40
 
 | Rust change | C++ translation |
 |---|---|
-| `GET /rooms/<id>/event/<event_id>` — joined membership required, returns the raw stored PDU; missing → M_NOT_FOUND "Event not found." | identical, via existing `Data::pdu_get` (eventid_pduid → pduid_pdus lookup from step 6) |
+| `send_request` parses destination for `:port`; if present uses it, else falls back to 8448. | Translated to C++ with the same wire shape and behavior. |
 
-## Verified
+## Implementation details
 
-```
-joined user GET event   → 200 full signed PDU JSON
-non-member GET event    → 403 You don't have permission
-nonexistent event       → 404 M_NOT_FOUND
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```

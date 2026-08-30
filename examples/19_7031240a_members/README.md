@@ -1,17 +1,21 @@
-# Step 19 — "improvement: /members route" (Conduit `7031240a`, 2020-06-14)
+# Step 19 — "improvement: /members route" (Conduit `7031240a`)
 
-Source: [`timokoesters/conduit@7031240a`](https://github.com/timokoesters/conduit/commit/7031240a)
+Source: [`timokoesters/conduit@7031240a`](https://github.com/timokoesters/conduit/commit/7031240a) (2020-06-16)
 
 ## What changed vs step 18
 
 | Rust change | C++ translation |
 |---|---|
-| GET /rooms/<id>/members now requires joined membership (`is_joined` check, was commented out) | enforced — non-members get 403 |
-| returns real member events via `room_state_type(RoomMember)` (was empty Vec) | `Data::room_state_type` prefix-scans roomstateid_pdu by type |
+| `GET /rooms/{id}/members` requires joined membership (returns 403 for non-members). Returns real member events via `room_state_type(RoomMember)` (prefix-scan `roomstateid_pdu` by type). | Translated to C++ with the same wire shape and behavior. |
 
-## Verified
+## Implementation details
 
-```
-bob (joined)   → chunk with both member events (incl. unsigned.prev_content)
-carol (absent) → 403 You don't have permission to view this room.
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```

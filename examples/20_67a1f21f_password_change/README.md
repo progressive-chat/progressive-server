@@ -1,24 +1,21 @@
-# Step 20 — "implement password changing" (Conduit `67a1f21f`, 2020-07-02, PR #138)
+# Step 20 — "feat: implement password changing (#138)" (Conduit `67a1f21f`)
 
-Source: [`timokoesters/conduit@67a1f21f`](https://github.com/timokoesters/conduit/commit/67a1f21f)
+Source: [`timokoesters/conduit@67a1f21f`](https://github.com/timokoesters/conduit/commit/67a1f21f) (2020-07-02)
 
-## What changed vs step 15 (logout)
+## What changed vs step 19
 
 | Rust change | C++ translation |
 |---|---|
-| `POST /account/password` with UIAA `m.login.password` stage | route added; wrong current password → 403 M_FORBIDDEN |
-| `Users::set_password` — Argon2id rehash and store | `Data::set_password` via `utils::calculate_hash` |
-| logout all devices EXCEPT current one | iterates `all_device_ids`, skips bound device, calls `remove_device` |
+| Adds `POST /account/password` route. `Data::set_password` updates the Argon2id hash; old tokens are removed; if `logout_devices` is true, all other device tokens are also removed. | Translated to C++ with the same wire shape and behavior. |
 
-Also folded: `remove_device(user, device)` public wrapper (upstream
-`users.rs remove_device`) for direct device removal.
+## Implementation details
 
-## Verified
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
-```
-no auth          → 401 {flows:[m.login.password]}
-wrong current pw → 403 M_FORBIDDEN
-correct pw       → 200; other device's token invalidated [401];
-                   current token still works [200]
-new password     → login works; old password rejected
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```

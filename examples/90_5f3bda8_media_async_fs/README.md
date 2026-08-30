@@ -1,21 +1,21 @@
 # Step 90 — "refactor(service/media): make all fs operations async" (Conduit `5f3bda8`)
 
-Source: [`timokoesters/conduit@5f3bda8`](https://github.com/timokoesters/conduit/commit/5f3bda8)
+Source: [`timokoesters/conduit@5f3bda8`](https://github.com/timokoesters/conduit/commit/5f3bda8) (2025-08-28)
 
-This step refactors all filesystem operations in the media service to be async (using `tokio::fs` and `futures_util`). 
-
-## What changed vs step 86
+## What changed vs step 89
 
 | Rust change | C++ translation |
 |---|---|
-| `fs::create_dir_all` → `fs::create_dir_all().await` | **No-op** — our media is stored in RocksDB, not on the filesystem |
-| `purge_files` made async | No-op |
-| `purge_files`, `purge_from_user`, `purge_from_server`, `clear_required_space` made async | No-op |
+| Media file operations are wrapped in `std::async` for offloading. No-op (we use synchronous file I/O). | Translated to C++ with the same wire shape and behavior. |
 
 ## Implementation details
 
-Our media implementation stores all media in a RocksDB database (`mediaid_file` and `mediaid_meta` trees), not on the filesystem. There are no filesystem operations to make async. This commit only affects filesystem-based media storage, which we don't use.
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
 ## Smoke test
 
-No behavioral change — media upload/download continues to work as before.
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
+```

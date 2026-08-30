@@ -1,32 +1,21 @@
-# Step 2 — "simple endpoint handlers" (Conduit `cd777af4`, 2020-02-18)
+# Step 2 — "feat: simple endpoint handlers" (Conduit `cd777af4`)
 
-Source: [`timokoesters/conduit@cd777af4`](https://github.com/timokoesters/conduit/commit/cd777af41c32cd0aba56b93d0e8fd6c42bc9a3ac)
-— the second commit in the lineage.
+Source: [`timokoesters/conduit@cd777af4`](https://github.com/timokoesters/conduit/commit/cd777af4) (2020-02-18)
 
-## Deltas vs step 1
+## What changed vs step 1
 
-| Rust | C++ |
+| Rust change | C++ translation |
 |---|---|
-| 4 new stub routes (versions, get_alias, join, send) | new handlers + `svr.Get/Post/Put` with regex captures for `<placeholders>` |
-| `MatrixResult<T>(Result<T, Error>)` responder | `ruma::MatrixResult<T>` = `std::variant<T, Error>` + generic `respond()` |
-| `ruma::error::{ErrorKind}` InvalidUsername/NotFound | same errcodes via `errcode()` |
-| register builds `UserId` via TryFrom (fails on bad chars) | `localpart_valid()` |
-| defaults: token `"randomtoken"`, homeserver `"localhost"`, device `"randomid"` | identical |
+| Adds 4 client-server endpoints: `/versions`, `/directory/room/{alias}`, `/rooms/{id}/join`, `/rooms/{id}/send/{type}/{txnid}`. Introduces `MatrixResult<T>` responder and M_NOT_FOUND/M_INVALID_USERNAME errors. | Translated to C++ with the same wire shape and behavior. |
 
-## Behavior
+## Implementation details
+
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
 
 ```console
-$ curl http://127.0.0.1:8000/_matrix/client/versions
-{"versions":["r0.6.0"]}
-
-$ curl -d '{"username":"neo"}' -X POST .../r0/register
-{"access_token":"randomtoken","device_id":"randomid","home_server":"localhost","user_id":"@neo:localhost"}
-
-$ curl -d '{"username":"bad user!"}' -X POST .../r0/register
-{"errcode":"M_INVALID_USERNAME","error":"Username was invalid. "}
-
-$ curl '.../directory/room/%23room:localhost'
-{"room_id":"!xclkjvdlfj:localhost","servers":["localhost"]}
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
 ```
-
-Still no persistence — every event is `$randomeventid`. That arrives in step 3.

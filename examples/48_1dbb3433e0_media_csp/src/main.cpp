@@ -919,34 +919,77 @@ int main(int argc, char** argv) {
                                              {"error", "Unrecognised access token"}},
                              401);
                return;
-             }
-             std::string room_id = req.matches[1];
-             if (room_id.rfind("#", 0) == 0) {
-               auto resolved = ctx.data->id_from_alias(room_id);
-               if (!resolved) {
-                 ruma::respond(res,
-                               nlohmann::json{{"errcode", "M_NOT_FOUND"},
-                                              {"error", "Room alias not found."}},
-                               404);
-                 return;
-               }
-                room_id = *resolved;
+             }              std::string room_id = req.matches[1];
+              // NEW in c5313b3e: when joining by alias, the response's
+              // `servers` field is the candidate list for federation. We
+              // first try local id_from_alias, then fall back to a remote
+              // query/directory call to the alias's home server.
+              std::vector<std::string> alias_servers;
+              if (room_id.rfind("#", 0) == 0) {
+                auto resolved = ctx.data->id_from_alias(room_id);
+                if (resolved) {
+                  room_id = *resolved;
+                } else {
+                  // Alias not local — ask the alias's home server
+                  // (the part after `:`) for the room_id and a list of
+                  // candidate servers. Mirrors Conduit's get_alias_helper.
+                  const size_t acolon = room_id.find(':');
+                  const std::string ahome =
+                      acolon == std::string::npos
+                          ? std::string()
+                          : room_id.substr(acolon + 1);
+                  if (!ahome.empty() && ahome != kServerName) {
+                    const std::string qpath =
+                        "/_matrix/federation/v1/query/directory?room_alias=" +
+                        room_id;
+                    auto qresp = federation::send_request(
+                        ctx.data->hostname(), ctx.data->keypair(), ahome,
+                        qpath);
+                    if (qresp && qresp->contains("room_id")) {
+                      room_id = (*qresp)["room_id"].get<std::string>();
+                      if (qresp->contains("servers") &&
+                          (*qresp)["servers"].is_array()) {
+                        for (const auto& s : (*qresp)["servers"])
+                          if (s.is_string())
+                            alias_servers.push_back(s.get<std::string>());
+                      }
+                      if (alias_servers.empty()) alias_servers.push_back(ahome);
+                    } else {
+                      ruma::respond(res,
+                                    nlohmann::json{{"errcode", "M_NOT_FOUND"},
+                                                   {"error",
+                                                    "Room alias not found."}},
+                                    404);
+                      return;
+                    }
+                  } else {
+                    ruma::respond(res,
+                                  nlohmann::json{{"errcode", "M_NOT_FOUND"},
+                                                 {"error",
+                                                  "Room alias not found."}},
+                                  404);
+                    return;
+                  }
+                }
               }
 
               // NEW in 12a8c9ba: federation join. If the room lives on another
               // server, fetch its state over federation, persist it locally, and
               // append our own join event. (Untested locally — needs a peer.)
-                            // NEW in 12a8c9ba: federation join. If the room lives on another
-              // server, fetch its state over federation, persist it locally, and
-              // append our own join event. (Untested locally — needs a peer.)
-              // NEW in c5313b3e: try each candidate server in turn. The
-              // candidate list starts with the room's home server; for alias
-              // joins it would be populated from get_alias's servers field.
+              // NEW in c5313b3e: try each candidate server in turn. For room_id
+              // joins the list is just [room's home server]; for alias joins it
+              // is the `servers` field from the alias resolution response.
               const size_t fcolon = room_id.find(':');
               const std::string fremote =
                   fcolon == std::string::npos ? std::string() : room_id.substr(fcolon + 1);
               if (!fremote.empty() && fremote != kServerName) {
-                std::vector<std::string> servers = {fremote};
+                // If the join came from an alias resolution, the candidate
+                // list came from the alias's servers field; otherwise we
+                // start with just the room's home server.
+                std::vector<std::string> servers =
+                    alias_servers.empty()
+                        ? std::vector<std::string>{fremote}
+                        : alias_servers;
                 bool joined = false;
                 std::string join_event_id;
                 for (const auto& srv : servers) {

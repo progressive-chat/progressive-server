@@ -26,6 +26,7 @@
 #include "ruma_wrapper.hpp"
 #include "rooms_helpers.hpp"
 #include "rooms_alias.hpp"
+#include "appservice_server.hpp"
 #include "argon2.h"
 #include "utils.hpp"
 
@@ -108,6 +109,24 @@ void federation_send_background(Context* ctx, const std::string& room_id,
                                std::string pdu_json) {
   std::thread([ctx, room_id, pdu_json = std::move(pdu_json)]() mutable {
     federation_send_to_remotes(ctx, room_id, std::move(pdu_json));
+  }).detach();
+}
+
+// NEW in 6e5b35ea: appservice event dispatch.
+void appservice_dispatch_event(Context* ctx, const nlohmann::json& pdu) {
+  std::thread([ctx, pdu]() {
+    const std::string sender = pdu.value("sender", "");
+    for (const auto& reg : ctx->data->appservice_all()) {
+      const std::string as_sender = reg.value("sender", "");
+      if (!as_sender.empty() && as_sender != sender) {
+        const std::string local = sender.substr(0, sender.find(':'));
+        if (local.find(as_sender) == std::string::npos) continue;
+      }
+      appservice::send_request(
+          ctx->data->hostname(), ctx->data->keypair(), reg,
+          "PUT",
+          "/_matrix/app/v1/transactions/" + utils::random_string(16), pdu);
+    }
   }).detach();
 }
 
@@ -511,6 +530,14 @@ ruma::MatrixResult<ruma::CreateMessageEventResponse> create_message_event_route(
   // b7ab57897: do it off the request path so sending never blocks the client.
   if (auto pdu_text = ctx->data->pdu_get(event_id))
     federation_send_background(ctx, body.room_id, *pdu_text);
+
+  // NEW in 6e5b35ea: dispatch to any appservices whose namespace matches the sender.
+  if (auto pdu_text = ctx->data->pdu_get(event_id)) {
+    auto pdu_json = nlohmann::json::parse(*pdu_text, nullptr, false);
+    if (!pdu_json.is_discarded() && pdu_json.is_object()) {
+      appservice_dispatch_event(ctx, pdu_json);
+    }
+  }
 
   return ruma::MatrixResult<ruma::CreateMessageEventResponse>::ok(
       ruma::CreateMessageEventResponse{.event_id = event_id});

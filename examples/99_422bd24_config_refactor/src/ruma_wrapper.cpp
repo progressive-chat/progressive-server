@@ -29,6 +29,9 @@ Ruma<RegisterRequest> Ruma<RegisterRequest>::from_request(const httplib::Request
         parsed.password = it->get<std::string>();
       if (auto it = body.find("device_id"); it != body.end() && it->is_string())
         parsed.device_id = it->get<std::string>();
+      // NEW in 6e5b35ea: from_appservice
+      if (auto it = body.find("from_appservice"); it != body.end() && it->is_boolean())
+        parsed.from_appservice = it->get<bool>();
     }
   }
   Ruma<RegisterRequest> wrapper;
@@ -331,6 +334,9 @@ Ruma<CreateRoomRequest> Ruma<CreateRoomRequest>::from_request(const httplib::Req
       // NEW in 660dd9c: room_version
       if (auto it = body.find("room_version"); it != body.end() && it->is_string())
         wrapper.value.room_version = it->get<std::string>();
+      // NEW in 6e5b35ea: from_appservice
+      if (auto it = body.find("from_appservice"); it != body.end() && it->is_boolean())
+        wrapper.value.from_appservice = it->get<bool>();
     }
   }
   return wrapper;

@@ -695,6 +695,18 @@ std::optional<std::string> Data::appservice_id_from_token(
   return db_.appservice_token_id.get(token);
 }
 
+// NEW in 6e5b35ea: iterate all appservices for event dispatch.
+std::vector<nlohmann::json> Data::appservice_all() const {
+  std::vector<nlohmann::json> out;
+  for (const auto& [id, reg_str] : db_.appserviceid_registration.iter_all()) {
+    auto parsed = nlohmann::json::parse(reg_str, nullptr, false);
+    if (!parsed.is_discarded() && parsed.is_object()) {
+      out.push_back(std::move(parsed));
+    }
+  }
+  return out;
+}
+
 
 /// NEW in b8193984: deactivate account — remove all devices, blank password.
 void Data::deactivate_account(const std::string& user_id) {

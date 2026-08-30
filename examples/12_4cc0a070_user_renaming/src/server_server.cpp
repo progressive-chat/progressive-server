@@ -1,5 +1,5 @@
 // server_server.cpp — translation of Conduit commit 720cc0cf's
-// src/server_server.rs send_request.
+// src/server_server.rs send_request + 4cc0a070's request_well_known.
 //
 //   * request bodies travel under the "content" key of the signed JSON
 //     (that was fix 873d1915: "http body as content when signing")
@@ -8,6 +8,10 @@
 //     hardcoded to "privacytools.io" while the connection itself goes to
 //     `destination`. Real remote servers would reject that signature — it is
 //     a debugging leftover in the original commit, preserved here on purpose.
+//   * request_well_known (NEW in 4cc0a070) — fetches a remote server's
+//     /.well-known/matrix/server and returns the m.server delegation hint.
+//     Added but not yet called by any handler in this commit; consumed by
+//     later federation resolution paths.
 //
 // Everything else (sign_json, X-Matrix header) matches ruma-signatures.
 
@@ -19,6 +23,22 @@
 #include <httplib.h>
 
 namespace federation {
+
+// NEW in 4cc0a070: request_well_known — resolves a destination's
+// /.well-known/matrix/server to its actual m.server. Translated to
+// synchronous httplib (upstream used async reqwest).
+std::optional<std::string> request_well_known(const std::string& destination) {
+  httplib::SSLClient client(destination, 443);
+  client.enable_server_certificate_verification(false);  // sandbox proxy MITM
+  auto res = client.Get("/.well-known/matrix/server");
+  if (!res) return std::nullopt;
+  auto body = nlohmann::json::parse(res->body, nullptr, false);
+  if (body.is_discarded() || !body.contains("m.server") ||
+      !body["m.server"].is_string()) {
+    return std::nullopt;
+  }
+  return body["m.server"].get<std::string>();
+}
 
 std::optional<nlohmann::json> send_request(
     const std::string& hostname, const std::string& keypair_seed,

@@ -941,34 +941,51 @@ int main(int argc, char** argv) {
               // NEW in 12a8c9ba: federation join. If the room lives on another
               // server, fetch its state over federation, persist it locally, and
               // append our own join event. (Untested locally — needs a peer.)
+                            // NEW in 12a8c9ba: federation join. If the room lives on another
+              // server, fetch its state over federation, persist it locally, and
+              // append our own join event. (Untested locally — needs a peer.)
+              // NEW in c5313b3e: try each candidate server in turn. The
+              // candidate list starts with the room's home server; for alias
+              // joins it would be populated from get_alias's servers field.
               const size_t fcolon = room_id.find(':');
               const std::string fremote =
                   fcolon == std::string::npos ? std::string() : room_id.substr(fcolon + 1);
               if (!fremote.empty() && fremote != kServerName) {
-                nlohmann::json fcontent = {{"membership", "join"}};
-                if (auto fdn = ctx.data->displayname_get(*user))
-                  fcontent["displayname"] = *fdn;
-                nlohmann::json join_event = {
-                    {"type", "m.room.member"},
-                    {"content", std::move(fcontent)},
-                    {"event_id", "$thiswillbefilledinlater"},
-                    {"origin_server_ts", utils::millis_since_unix_epoch()},
-                    {"room_id", room_id},
-                    {"sender", *user},
-                    {"state_key", *user},
-                    {"unsigned", json::object()},
-                };
-                const std::string join_event_id = crypto::reference_hash(join_event);
-                join_event["event_id"] = join_event_id;
-
-                // NEW in c5313b3e: try each candidate server until one answers.
                 std::vector<std::string> servers = {fremote};
                 bool joined = false;
+                std::string join_event_id;
                 for (const auto& srv : servers) {
+                  // Step 1: make_join — the remote returns an unsigned join
+                  // event template with auth_events + prev_events filled in.
+                  // We use this as the skeleton, then sign + echo back via
+                  // send_join.
+                  const std::string mjpath =
+                      "/_matrix/federation/v1/make_join/" + room_id + "/" + *user;
+                  auto mjresp = federation::send_request(
+                      ctx.data->hostname(), ctx.data->keypair(), srv, mjpath);
+                  if (!mjresp) continue;
+                  if (!mjresp->contains("event")) continue;
+                  nlohmann::json join_event = (*mjresp)["event"];
+                  if (join_event.contains("content") &&
+                      join_event["content"].is_object()) {
+                    join_event["content"]["membership"] = "join";
+                  }
+                  if (auto fdn = ctx.data->displayname_get(*user))
+                    join_event["content"]["displayname"] = *fdn;
+                  join_event["origin_server_ts"] = utils::millis_since_unix_epoch();
+                  join_event["event_id"] = "$thiswillbefilledinlater";
+                  join_event["unsigned"] = json::object();
+                  join_event_id = crypto::reference_hash(join_event);
+                  join_event["event_id"] = join_event_id;
+
+                  // Step 2: send_join — the remote merges our join event into
+                  // the room and returns the full state + auth_chain for our
+                  // local cache.
                   const std::string fpath =
                       "/_matrix/federation/v1/send_join/" + room_id + "/" +
                       join_event_id;
-                  auto fresp = federation::send_request(ctx.data->hostname(), ctx.data->keypair(), srv, fpath);
+                  auto fresp = federation::send_request(
+                      ctx.data->hostname(), ctx.data->keypair(), srv, fpath);
                   if (!fresp) continue;
                   for (const char* key : {"auth_chain", "state"}) {
                     if ((*fresp).contains(key) && (*fresp)[key].is_array()) {
@@ -985,23 +1002,20 @@ int main(int argc, char** argv) {
                   federation::send_request(ctx.data->hostname(), ctx.data->keypair(), srv,
                                            "/_matrix/federation/v1/send/" + room_id + "/",
                                            json::object());
-                  ctx.data->add_room_server(room_id, srv);
                   joined = true;
                   break;
                 }
                 if (!joined) {
                   ruma::respond(res,
-                                ruma::json{{"errcode", "M_UNKNOWN"},
+                                nlohmann::json{{"errcode", "M_UNKNOWN"},
                                            {"error", "Failed to contact any remote server "
                                                      "for federation join."}},
                                 502);
                   return;
                 }
-                ruma::respond(res, ruma::json{{"room_id", room_id}});
+                ruma::respond(res, nlohmann::json{{"room_id", room_id}});
                 return;
-              }
-
-              if (!ctx.data->room_join(room_id, *user)) {
+              }            if (!ctx.data->room_join(room_id, *user)) {
                ruma::respond(res,
                              nlohmann::json{{"errcode", "M_FORBIDDEN"},
                                             {"error", "event not authorized"}},

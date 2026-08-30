@@ -16,5 +16,11 @@ std::optional<nlohmann::json> send_request(
     const std::string& hostname, const std::string& keypair_seed,
     const std::string& destination, const std::string& path,
     const nlohmann::json& content = {});
+// NEW in 4cc0a070: request_well_known — fetches
+// https://<destination>/.well-known/matrix/server and returns the m.server
+// delegation hint. Returns nullopt on any network/parse/format error.
+std::optional<std::string> request_well_known(const std::string& destination);
+
+
 
 }  // namespace federation

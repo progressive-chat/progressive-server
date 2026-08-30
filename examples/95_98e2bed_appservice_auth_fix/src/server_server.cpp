@@ -29,6 +29,23 @@ namespace federation {
 // in the outgoing User-Agent (ruma encodes the supported versions there for
 // peers to read).
 static const std::string MATRIX_VERSIONS = "V1_13";
+// NEW in 4cc0a070: request_well_known — resolves a destination's
+// /.well-known/matrix/server to its actual m.server. Translated to
+// synchronous httplib (upstream used async reqwest).
+std::optional<std::string> request_well_known(const std::string& destination) {
+  httplib::SSLClient client(destination, 443);
+  client.enable_server_certificate_verification(false);  // sandbox proxy MITM
+  auto res = client.Get("/.well-known/matrix/server");
+  if (!res) return std::nullopt;
+  auto body = nlohmann::json::parse(res->body, nullptr, false);
+  if (body.is_discarded() || !body.contains("m.server") ||
+      !body["m.server"].is_string()) {
+    return std::nullopt;
+  }
+  return body["m.server"].get<std::string>();
+}
+
+
 
 std::optional<nlohmann::json> send_request(
     const std::string& hostname, const std::string& keypair_seed,

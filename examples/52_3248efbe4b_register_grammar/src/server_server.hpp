@@ -23,5 +23,11 @@ std::optional<nlohmann::json> send_request(
 // does not match `self`; requests without an X-Matrix header always pass.
 bool xmatrix_destination_ok(const std::string& authorization,
                             const std::string& self);
+// NEW in 4cc0a070: request_well_known — fetches
+// https://<destination>/.well-known/matrix/server and returns the m.server
+// delegation hint. Returns nullopt on any network/parse/format error.
+std::optional<std::string> request_well_known(const std::string& destination);
+
+
 
 }  // namespace federation

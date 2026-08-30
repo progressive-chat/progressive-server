@@ -2508,6 +2508,31 @@ int main(int argc, char** argv) {
             ruma::respond(res, nlohmann::json{{"m.upload.size", 20 * 1024 * 1024}});
           });
 
+  // POST /_matrix/client/v1/media/upload?filename=… — auth-gated upload for
+  // MSC3916. Same wire shape as the r0 endpoint; the v1 path is the unstable
+  // location that authenticated media is served from. Body IS the file;
+  // Content-Type is the file's media type (defaults to application/octet-stream).
+  // Step 71+ uses (server, media_id) keyed storage (70d7f77) and may also pass
+  // a uploader user_id (73+).
+  svr.Post("/_matrix/client/v1/media/upload",
+           [&ctx, v1_media_auth](const httplib::Request& req,
+                                 httplib::Response& res) {
+             if (!v1_media_auth(req, res)) return;
+             const std::string media_server = ctx.data->hostname();
+             const std::string media_id =
+                 utils::random_string(256);  // MXC_LENGTH = 256 upstream
+             const std::string mxc = "mxc://" + media_server + "/" + media_id;
+             std::optional<std::string> filename;
+             if (req.has_param("filename")) filename = req.get_param_value("filename");
+             const std::string content_type =
+                 req.has_header("Content-Type")
+                     ? req.get_header_value("Content-Type")
+                     : "application/octet-stream";
+             ctx.data->media_create(media_server, media_id, filename, content_type, req.body);
+             ruma::respond(res, nlohmann::json{{"content_uri", mxc}});
+           });
+
+
   // GET /_matrix/client/v1/media/download/{server}/{id}/{filename} — inline
   // disposition with the requested filename. Registered before the 2-segment
   // download route so the more specific path wins.

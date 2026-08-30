@@ -2725,6 +2725,40 @@ svr.Post(R"(/_matrix/client/r0/rooms/(.+)/upgrade)",
              ruma::respond(res, ruma::json{{"pdus", json::object()}}, 200);
            });
 
+  // NEW in eedac4f: make_join (federation) — return an unsigned join event
+  // template for the remote to sign. The remote will then POST the signed
+  // event to /send_join. Adapted: we report a default room version (1) and
+  // include a basic event stub; full auth-events collection is not done
+  // because we don't track per-room versions or full state-res locally.
+  svr.Get(R"(/_matrix/federation/v1/make_join/([^/]+)/([^/]+))",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+            const std::string room_id = url_decode(req.matches[1]);
+            const std::string user_id = url_decode(req.matches[2]);
+            if (ctx.data->room_state(room_id).empty()) {
+              ruma::respond(res,
+                            ruma::json{{"errcode", "M_NOT_FOUND"},
+                                       {"error", "Room not found."}},
+                            404);
+              return;
+            }
+            // Build a basic join event template. The remote will sign and
+            // re-send via /send_join. We do not include full prev_events
+            // here — that is appended during /send_join's state/auth_chain
+            // merge step.
+            nlohmann::json event = {
+                {"type", "m.room.member"},
+                {"content", {{"membership", "join"}}},
+                {"room_id", room_id},
+                {"sender", user_id},
+                {"state_key", user_id},
+            };
+            ruma::respond(res,
+                          ruma::json{{"room_version", "1"},
+                                     {"event", std::move(event)}},
+                          200);
+          });
+
+
   svr.Get(R"(/_matrix/federation/v1/send_join/([^/]+)/([^/]+))",
           [&ctx](const httplib::Request& req, httplib::Response& res) {
             const std::string room_id = url_decode(req.matches[1]);

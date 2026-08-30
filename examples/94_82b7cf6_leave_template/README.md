@@ -1,4 +1,4 @@
-# Step 100 — "fix: use populate_membership_template for `/leave`" (Conduit `82b7cf6`)
+# Step 94 — "fix: use populate_membership_template for `/leave`" (Conduit `82b7cf6`)
 
 Source: [`timokoesters/conduit@82b7cf6`](https://github.com/timokoesters/conduit/commit/82b7cf6)
 

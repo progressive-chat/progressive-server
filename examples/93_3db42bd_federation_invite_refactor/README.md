@@ -1,6 +1,6 @@
-# Step 86 — "feat: room version 12" (Conduit `660dd9c`)
+# Step 93 — "fix: use append_member_pdu for `/invite`" (Conduit `3db42bd`)
 
-Source: [`timokoesters/conduit@660dd9c`](https://github.com/timokoesters/conduit/commit/660dd9c)
+Source: [`timokoesters/conduit@3db42bd`](https://github.com/timokoesters/conduit/commit/3db42bd)
 
 This step adds support for **Matrix Room Version 12**, which includes the features from MSC4289, MSC4291, and MSC4297.
 

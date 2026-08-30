@@ -1,6 +1,6 @@
-# Step 86 — "feat: room version 12" (Conduit `660dd9c`)
+# Step 99 — "refactor: move configuration to its own crate" (Conduit `422bd24`)
 
-Source: [`timokoesters/conduit@660dd9c`](https://github.com/timokoesters/conduit/commit/660dd9c)
+Source: [`timokoesters/conduit@422bd24`](https://github.com/timokoesters/conduit/commit/422bd24)
 
 This step adds support for **Matrix Room Version 12**, which includes the features from MSC4289, MSC4291, and MSC4297.
 

@@ -1,6 +1,6 @@
-# Step 86 — "feat: room version 12" (Conduit `660dd9c`)
+# Step 98 — "feat: add option to ignore specific server signing keys" (Conduit `d058dab`)
 
-Source: [`timokoesters/conduit@660dd9c`](https://github.com/timokoesters/conduit/commit/660dd9c)
+Source: [`timokoesters/conduit@d058dab`](https://github.com/timokoesters/conduit/commit/d058dab)
 
 This step adds support for **Matrix Room Version 12**, which includes the features from MSC4289, MSC4291, and MSC4297.
 

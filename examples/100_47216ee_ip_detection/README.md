@@ -1,6 +1,6 @@
-# Step 86 — "feat: room version 12" (Conduit `660dd9c`)
+# Step 100 — "feat: make IP address detection method configurable" (Conduit `47216ee`)
 
-Source: [`timokoesters/conduit@660dd9c`](https://github.com/timokoesters/conduit/commit/660dd9c)
+Source: [`timokoesters/conduit@47216ee`](https://github.com/timokoesters/conduit/commit/47216ee)
 
 This step adds support for **Matrix Room Version 12**, which includes the features from MSC4289, MSC4291, and MSC4297.
 

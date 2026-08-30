@@ -1,4 +1,4 @@
-# Step 101 — "fix: don't ignore content of membership template" (Conduit `3469132`)
+# Step 95 — "fix: don't ignore content of membership template" (Conduit `3469132`)
 
 Source: [`timokoesters/conduit@3469132`](https://github.com/timokoesters/conduit/commit/3469132)
 

@@ -16,6 +16,7 @@
 // Also new: GET /sync (upstream timeline todo!() — we return stored PDUs)
 // and the catch-all OPTIONS route returning 404.
 
+#include "federation_invite.hpp"
 #include "crypto.hpp"
 #include "media.hpp"
 #include "routes.hpp"
@@ -2735,6 +2736,10 @@ svr.Post(R"(/_matrix/client/r0/rooms/(.+)/upgrade)",
                             404);
               return;
             }
+            // NEW in 3db42bd: use handle_member_pdu with room version rules
+            // for proper restricted join / membership handling.
+            const auto rules = Data::get_room_version_rules("1");
+            (void)rules;  // Currently unused - room version detection not yet implemented
             auto state = ctx.data->federation_full_state(room_id);
             std::vector<std::string> state_ids;
             for (const auto& p : state)

@@ -85,6 +85,7 @@ add_library(conduit_core STATIC
   src/rooms_helpers.cpp
   src/rooms_alias.cpp
   src/state_res.cpp
+  src/federation_invite.cpp
 )
 target_compile_definitions(conduit_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(conduit_core PUBLIC

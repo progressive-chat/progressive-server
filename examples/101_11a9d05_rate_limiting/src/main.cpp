@@ -910,7 +910,7 @@ int main(int argc, char** argv) {
   // NEW in a888c7cb16: POST /user/{userId}/openid/request_token — mint an OpenID
   // access token so third-party services can verify the user's identity. The
   // sender must equal the requested user (enforced since 08366bf28b).
-  svr.Post(R"(/_matrix/client/r0/user/(.+)/openid/request_token)",
+  svr.Post("/_matrix/client/r0/user/([^/]+)/openid/request_token",
            [&ctx](const httplib::Request& req, httplib::Response& res) {
              const auto token = extract_token(req);
              std::optional<std::string> sender;

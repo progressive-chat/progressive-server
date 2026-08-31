@@ -1,8 +1,8 @@
-# Step 95 — "fix: don't perform identity assertion on appservice-only endpoints" (Conduit `98e2bed`)
+# 2026-tail — "fix: don't perform identity assertion on appservice-only endpoints" (Conduit `98e2bed`)
 
 Source: [`timokoesters/conduit@98e2bed`](https://github.com/timokoesters/conduit/commit/98e2bed) (2026-01-22)
 
-## What changed vs step 94
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

@@ -1,8 +1,8 @@
-# Step 99 — "refactor: move configuration to it's own crate" (Conduit `422bd24`)
+# 2026-tail — "refactor: move configuration to it's own crate" (Conduit `422bd24`)
 
 Source: [`timokoesters/conduit@422bd24`](https://github.com/timokoesters/conduit/commit/422bd24) (2026-07-17)
 
-## What changed vs step 98
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

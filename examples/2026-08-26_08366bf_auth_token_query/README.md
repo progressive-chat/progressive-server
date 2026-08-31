@@ -1,8 +1,8 @@
-# Step 102 — "fix: only allow request to pass auth with token query if auth type is None" (Conduit `08366bf`)
+# 2026-tail — "fix: only allow request to pass auth with token query if auth type is None" (Conduit `08366bf`)
 
 Source: [`timokoesters/conduit@08366bf`](https://github.com/timokoesters/conduit/commit/08366bf) (2026-08-26)
 
-## What changed vs step 101
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

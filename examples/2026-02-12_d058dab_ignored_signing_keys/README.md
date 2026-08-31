@@ -1,8 +1,8 @@
-# Step 96 — "feat: add option to ignore specific server signing keys" (Conduit `d058dab`)
+# 2026-tail — "feat: add option to ignore specific server signing keys" (Conduit `d058dab`)
 
 Source: [`timokoesters/conduit@d058dab`](https://github.com/timokoesters/conduit/commit/d058dab) (2026-02-12)
 
-## What changed vs step 95
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

@@ -1,8 +1,8 @@
-# Step 100 — "feat: make IP address detection method configurable" (Conduit `47216ee`)
+# 2026-tail — "feat: make IP address detection method configurable" (Conduit `47216ee`)
 
 Source: [`timokoesters/conduit@47216ee`](https://github.com/timokoesters/conduit/commit/47216ee) (2026-07-17)
 
-## What changed vs step 99
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

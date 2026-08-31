@@ -1,8 +1,8 @@
-# Step 97 — "feat: Add user agent string" (Conduit `8def22bfb8`)
+# 2026-tail — "feat: Add user agent string" (Conduit `8def22bfb8`)
 
 Source: [`timokoesters/conduit@8def22bfb8`](https://github.com/timokoesters/conduit/commit/8def22bfb8) (2026-03-05)
 
-## What changed vs step 96
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

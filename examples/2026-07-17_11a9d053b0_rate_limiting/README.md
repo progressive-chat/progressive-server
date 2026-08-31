@@ -1,8 +1,8 @@
-# Step 101 — "feat: rate-limiting" (Conduit `11a9d05`)
+# 2026-tail — "feat: rate-limiting" (Conduit `11a9d053b0`)
 
-Source: [`timokoesters/conduit@11a9d05`](https://github.com/timokoesters/conduit/commit/11a9d05) (2026-07-17)
+Source: [`timokoesters/conduit@11a9d053b0`](https://github.com/timokoesters/conduit/commit/11a9d053b0) (2026-07-17)
 
-## What changed vs step 100
+## What changed vs step 93 (last numbered step)
 
 | Rust change | C++ translation |
 |---|---|

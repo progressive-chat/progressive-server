@@ -2,7 +2,7 @@
 
 Source: [`timokoesters/conduit@abcce95d`](https://github.com/timokoesters/conduit/commit/abcce95d) (2020-04-14)
 
-## What changed vs step 7
+## What changed vs step 6
 
 | Rust change | C++ translation |
 |---|---|

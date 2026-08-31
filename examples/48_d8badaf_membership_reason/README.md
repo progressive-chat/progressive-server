@@ -2,7 +2,7 @@
 
 Source: [`timokoesters/conduit@d8badaf`](https://github.com/timokoesters/conduit/commit/d8badaf) (2024-05-05)
 
-## What changed vs step 60
+## What changed vs step 47
 
 | Rust change | C++ translation |
 |---|---|

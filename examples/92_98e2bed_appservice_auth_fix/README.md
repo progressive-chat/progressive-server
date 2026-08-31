@@ -1,12 +1,12 @@
-# Step 92 — "fix: don't ignore content of membership template" (Conduit `346913268f`)
+# Step 92 — "fix: don't perform identity assertion on appservice-only endpoints" (Conduit `98e2bed`)
 
-Source: [`timokoesters/conduit@346913268f`](https://github.com/timokoesters/conduit/commit/346913268f) (2025-12-30)
+Source: [`timokoesters/conduit@98e2bed`](https://github.com/timokoesters/conduit/commit/98e2bed) (2026-01-22)
 
 ## What changed vs step 91
 
 | Rust change | C++ translation |
 |---|---|
-| No-op — we don't have `populate_membership_template`; our local events build content from scratch. | Translated to C++ with the same wire shape and behavior. |
+| Appservice ping endpoint only accepts `AuthScheme::AppserviceToken` (matched via `appservice_id_from_token`). | Translated to C++ with the same wire shape and behavior. |
 
 ## Implementation details
 

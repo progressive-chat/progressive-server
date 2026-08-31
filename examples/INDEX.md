@@ -26,9 +26,9 @@ is needed.
 
 ## Timeline
 
-**Numbered steps (1-91):** Stable, Conduit commits from 2020-02-15 to 2025-12-30. Hard step numbers because these commits are unlikely to have intervening additions.
+**Numbered steps (1-54):** All from 2020. Hard step numbers because these commits are stable and the user wants chronological correspondence to Conduit's 2020 development.
 
-**Date-based steps (post-91):** Recent Conduit commits from 2026+. Named `YYYY-MM-DD_HASH_description` so they can be sorted and re-ordered as Conduit evolves.
+**Date-based steps (post-54):** Conduit commits from 2024+. Named `YYYY-MM-DD_HASH_description` so they can be sorted and re-ordered as Conduit evolves.
 
 | Step | Conduit commit | Date | Message | Directory |
 |---|---|---|---|---|
@@ -76,53 +76,63 @@ is needed.
 | 42 | `f4078a29e` | 2020-09-16 | fix: synapse complains about missing origin | `42_f4078a29e_origin` |
 | 43 | `a567cd81d` | 2020-09-16 | improvement: better logs on deserialization errors | `43_a567cd81d_logs` |
 | 44 | `3e0378755` | 2020-09-16 | Add Complement dockerfile and move sytest dir | `44_3e0378755_ci` |
-| 45 | `63ba157ef6` | 2024-05-02 | feat(auth): check if X-Matrix destination is correct if present | `45_63ba157ef6_xmatrix_dest` |
-| 46 | `c1f695653` | 2024-05-02 | feat: support hosting .well-known from Conduit | `46_c1f695653_wellknown_host` |
-| 47 | `9db1f5a13c` | 2024-05-02 | fix(admin): don't allow creation of remote users | `47_9db1f5a13c_admin` |
-| 48 | `d8badaf` | 2024-05-05 | fix(membership): always set reason & allow new events if reason changed | `48_d8badaf_membership_reason` |
-| 49 | `965b6df83d` | 2024-05-06 | fix: make media response match spec | `49_965b6df83d_media_contenttype` |
-| 50 | `a888c7cb16` | 2024-05-28 | OpenID routes | `50_a888c7cb16_openid` |
-| 51 | `59d7674` | 2024-05-29 | fix: clarify that 3pids are currently unsupported | `51_59d7674_threepid_unsupported` |
-| 52 | `1dbb3433e0` | 2024-06-03 | fix(media): use csp instead of modifying content-type | `52_1dbb3433e0_media_csp` |
-| 53 | `144d548` | 2024-06-12 | fix: permission checks for aliases | `53_144d548_alias_permissions` |
-| 54 | `423b092` | 2024-08-22 | use ruma content disposition type in place of string | `54_423b092_media_content_disposition` |
-| 55 | `27d6d94355` | 2024-08-28 | feat: add support for authenticated media requests | `55_27d6d94355_authenticated_media` |
-| 56 | `a6797ca0a2` | 2024-09-21 | fix: add missing msc3916 unstable feature in version response | `56_a6797ca0a2_versions_msc3916` |
-| 57 | `65fe6b0` | 2024-09-25 | fix: Empty content dispositions could create problems | `57_65fe6b0_empty_content_disposition` |
-| 58 | `30855ce` | 2025-02-04 | fix(media): return an error when content is failed to be parsed as an image | `58_30855ce_thumbnail_parse_error` |
-| 59 | `21af83e` | 2025-03-03 | feat: knocking | `59_21af83e_knocking` |
-| 60 | `42d8e88` | 2025-03-03 | Merge branch 'membership-refactor' into 'next' | `60_42d8e88_keys_upload_validation` |
-| 61 | `4dc15a4` | 2025-03-08 | refactor: set send_request matrix versions in a single constant | `61_4dc15a4_matrix_versions_constant` |
-| 62 | `dc5abd6` | 2025-03-08 | feat(appservice): pinging | `62_dc5abd6_appservice_pinging` |
-| 63 | `70d7f77` | 2025-05-06 | feat(media): use file's sha256 for on-disk name & make directory configurable | `63_70d7f77_media_sha256_ondisk` |
-| 64 | `66a14ac` | 2025-05-06 | feat: freeze unauthenticated media | `64_66a14ac_freeze_unauthenticated_media` |
-| 65 | `3171b77` | 2025-05-06 | feat(media): save user id of uploader | `65_3171b77_media_save_uploader` |
-| 66 | `d766370` | 2025-05-07 | feat(admin): commands for purging media | `66_d766370_media_purge` |
-| 67 | `594fe5f` | 2025-05-07 | feat(media): blocking | `67_594fe5f_media_blocking` |
-| 68 | `c3fb1b0` | 2025-05-07 | feat(media): retention policies | `68_c3fb1b0_media_retention` |
-| 69 | `fd16e9c` | 2025-05-07 | feat(admin): list & query information about media | `69_fd16e9c_admin_media_info` |
-| 70 | `a189b66` | 2025-05-07 | feat(admin): show media command | `70_a189b66_admin_show_media` |
-| 71 | `1fc82477c5` | 2025-05-12 | chore(/versions): declare support for matrix <= v1.12 | `71_1fc82477c5_versions_v112` |
-| 72 | `09e1713` | 2025-06-06 | feat(devices): update the device last seen timestamp on usage | `72_09e1713_device_last_seen` |
-| 73 | `3248efbe4b` | 2025-06-22 | fix(registration): enforce the strict user ID grammar | `73_3248efbe4b_register_grammar` |
-| 74 | `a87f4b6171` | 2025-07-04 | fix: Respond with HTTP code 413, when request size is too big | `74_a87f4b6171_req_size_413` |
-| 75 | `b5e3185` | 2025-08-10 | feat: MSC4289, Explicitly privilege room creators (1/2) | `75_b5e3185_msc4289_creator_privilege` |
-| 76 | `f6d14fd` | 2025-08-10 | feat: MSC4291, Room IDs as hashes of the create event (1/2) | `76_f6d14fd_msc4291_room_id_hash` |
-| 77 | `bc5145f092` | 2025-08-11 | feat(client-api): support `format` query parameter for `GET /state/` | `77_bc5145f092_state_format` |
-| 78 | `bd8686e` | 2025-08-11 | feat: MSC4291, Room IDs as hashes of the create event (2/2) | `78_bd8686e_msc4291_room_id_hash_2` |
-| 79 | `d71d94a` | 2025-08-11 | feat: MSC4297, State Resolution v2.1 | `79_d71d94a_msc4297_state_res_v2` |
-| 80 | `532b17a` | 2025-08-11 | feat: MSC4311, Ensuring the create event is available on invites and knocks | `80_532b17a_msc4311_create_event_invites` |
-| 81 | `660dd9c` | 2025-08-11 | feat: room version 12 | `81_660dd9c_room_version_12` |
-| 82 | `03dfa72` | 2025-08-16 | fix: don't lookup create event when converting stripped state | `82_03dfa72_fix_stripped_state` |
-| 83 | `1f7f74a` | 2025-08-28 | fix(service/media): create directory for media file only on new file creation | `83_1f7f74a_media_dir_creation` |
-| 84 | `5f3bda8` | 2025-08-28 | refactor(service/media): make all fs operations async | `84_5f3bda8_media_async_fs` |
-| 85 | `470e477` | 2025-08-28 | refactor(service/admin): improve readability for command processing | `85_470e477_admin_refactor` |
-| 86 | `6d22701` | 2025-08-28 | feat(service/media): add S3 support | `86_6d22701_media_s3_support` |
-| 87 | `1c6b2e0` | 2025-09-12 | feat: updated MSC4311 support | `87_1c6b2e0_msc4311_updated` |
-| 88 | `e757a98` | 2025-09-12 | fix: set previous creators to max power level if "upgraded" room doesn't support creator power level | `88_e757a98_upgrade_creator_power` |
-| 89 | `3db42bd` | 2025-12-22 | fix: use append_member_pdu for `/invite` | `89_3db42bd_federation_invite_refactor` |
-| 90 | `82b7cf6261` | 2025-12-30 | fix: use populate_membership_template for `/leave` | `90_82b7cf6261_leave_template` |
-| 91 | `346913268f` | 2025-12-30 | fix: don't ignore content of membership template | `91_346913268f_membership_template_content` |
+| 45 | `c4f5a0a6` | 2020-08-23 | Keep track of State at event for state resolution | `45_c4f5a0a6_keep_track_of_state` |
+| 46 | `cb68bf9` | 2020-08-23 | Use ring crate to generate StatHashes when saving stateid/statehash | `46_cb68bf9_ring_stat_hashes` |
+| 47 | `846a009` | 2020-08-23 | Split append_pdu -> append_pdu and build_and_append | `47_846a009_split_append_pdu` |
+| 48 | `d73c6aa` | 2020-08-23 | Add roomid_statehash tree, clean up review issues | `48_d73c6aa_roomid_statehash` |
+| 49 | `64fb037` | 2020-08-23 | Use Vec<u8> instead of string for digest bytes and add roomid_statehash | `49_64fb037_vec_u8_digest` |
+| 50 | `ea20032` | 2020-08-23 | Helper for join_room_by_id route so routes aren't calling routes | `50_ea20032_join_room_helper` |
+| 51 | `5ccdd36` | 2020-08-23 | Add helper function for get_alias route | `51_5ccdd36_get_alias_helper` |
+| 52 | `fe795d3` | 2020-08-23 | Replace route calling routes with helpers | `52_fe795d3_route_helpers` |
+| 53 | `672bf4f` | 2020-08-23 | Cargo lock update and a few doc additions | `53_672bf4f_cargo_lock` |
+| 54 | `972babb` | 2020-08-23 | fix: set limited to true when skipping messages in /sync | `54_972babb_sync_limited` |
+| tail | `63ba157ef6` | 2024-05-02 | feat(auth): check if X-Matrix destination is correct if present | `2024-05-02_63ba157ef6_xmatrix_dest` |
+| tail | `9db1f5a13c` | 2024-05-02 | fix(admin): don't allow creation of remote users | `2024-05-02_9db1f5a13c_admin` |
+| tail | `c1f695653` | 2024-05-02 | feat: support hosting .well-known from Conduit | `2024-05-02_c1f695653_wellknown_host` |
+| tail | `d8badaf` | 2024-05-05 | fix(membership): always set reason & allow new events if reason changed | `2024-05-05_d8badaf_membership_reason` |
+| tail | `965b6df83d` | 2024-05-06 | fix: make media response match spec | `2024-05-06_965b6df83d_media_contenttype` |
+| tail | `a888c7cb16` | 2024-05-28 | OpenID routes | `2024-05-28_a888c7cb16_openid` |
+| tail | `59d7674` | 2024-05-29 | fix: clarify that 3pids are currently unsupported | `2024-05-29_59d7674_threepid_unsupported` |
+| tail | `1dbb3433e0` | 2024-06-03 | fix(media): use csp instead of modifying content-type | `2024-06-03_1dbb3433e0_media_csp` |
+| tail | `144d548` | 2024-06-12 | fix: permission checks for aliases | `2024-06-12_144d548_alias_permissions` |
+| tail | `423b092` | 2024-08-22 | use ruma content disposition type in place of string | `2024-08-22_423b092_media_content_disposition` |
+| tail | `27d6d94355` | 2024-08-28 | feat: add support for authenticated media requests | `2024-08-28_27d6d94355_authenticated_media` |
+| tail | `a6797ca0a2` | 2024-09-21 | fix: add missing msc3916 unstable feature in version response | `2024-09-21_a6797ca0a2_versions_msc3916` |
+| tail | `65fe6b0` | 2024-09-25 | fix: Empty content dispositions could create problems | `2024-09-25_65fe6b0_empty_content_disposition` |
+| tail | `30855ce` | 2025-02-04 | fix(media): return an error when content is failed to be parsed as an image | `2025-02-04_30855ce_thumbnail_parse_error` |
+| tail | `21af83e` | 2025-03-03 | feat: knocking | `2025-03-03_21af83e_knocking` |
+| tail | `42d8e88` | 2025-03-03 | Merge branch 'membership-refactor' into 'next' | `2025-03-03_42d8e88_keys_upload_validation` |
+| tail | `4dc15a4` | 2025-03-08 | refactor: set send_request matrix versions in a single constant | `2025-03-08_4dc15a4_matrix_versions_constant` |
+| tail | `dc5abd6` | 2025-03-08 | feat(appservice): pinging | `2025-03-08_dc5abd6_appservice_pinging` |
+| tail | `3171b77` | 2025-05-06 | feat(media): save user id of uploader | `2025-05-06_3171b77_media_save_uploader` |
+| tail | `66a14ac` | 2025-05-06 | feat: freeze unauthenticated media | `2025-05-06_66a14ac_freeze_unauthenticated_media` |
+| tail | `70d7f77` | 2025-05-06 | feat(media): use file's sha256 for on-disk name & make directory configurable | `2025-05-06_70d7f77_media_sha256_ondisk` |
+| tail | `594fe5f` | 2025-05-07 | feat(media): blocking | `2025-05-07_594fe5f_media_blocking` |
+| tail | `a189b66` | 2025-05-07 | feat(admin): show media command | `2025-05-07_a189b66_admin_show_media` |
+| tail | `c3fb1b0` | 2025-05-07 | feat(media): retention policies | `2025-05-07_c3fb1b0_media_retention` |
+| tail | `d766370` | 2025-05-07 | feat(admin): commands for purging media | `2025-05-07_d766370_media_purge` |
+| tail | `fd16e9c` | 2025-05-07 | feat(admin): list & query information about media | `2025-05-07_fd16e9c_admin_media_info` |
+| tail | `1fc82477c5` | 2025-05-12 | chore(/versions): declare support for matrix <= v1.12 | `2025-05-12_1fc82477c5_versions_v112` |
+| tail | `09e1713` | 2025-06-06 | feat(devices): update the device last seen timestamp on usage | `2025-06-06_09e1713_device_last_seen` |
+| tail | `3248efbe4b` | 2025-06-22 | fix(registration): enforce the strict user ID grammar | `2025-06-22_3248efbe4b_register_grammar` |
+| tail | `a87f4b6171` | 2025-07-04 | fix: Respond with HTTP code 413, when request size is too big | `2025-07-04_a87f4b6171_req_size_413` |
+| tail | `b5e3185` | 2025-08-10 | feat: MSC4289, Explicitly privilege room creators (1/2) | `2025-08-10_b5e3185_msc4289_creator_privilege` |
+| tail | `f6d14fd` | 2025-08-10 | feat: MSC4291, Room IDs as hashes of the create event (1/2) | `2025-08-10_f6d14fd_msc4291_room_id_hash` |
+| tail | `532b17a` | 2025-08-11 | feat: MSC4311, Ensuring the create event is available on invites and knocks | `2025-08-11_532b17a_msc4311_create_event_invites` |
+| tail | `660dd9c` | 2025-08-11 | feat: room version 12 | `2025-08-11_660dd9c_room_version_12` |
+| tail | `bc5145f092` | 2025-08-11 | feat(client-api): support `format` query parameter for `GET /state/` | `2025-08-11_bc5145f092_state_format` |
+| tail | `bd8686e` | 2025-08-11 | feat: MSC4291, Room IDs as hashes of the create event (2/2) | `2025-08-11_bd8686e_msc4291_room_id_hash_2` |
+| tail | `d71d94a` | 2025-08-11 | feat: MSC4297, State Resolution v2.1 | `2025-08-11_d71d94a_msc4297_state_res_v2` |
+| tail | `03dfa72` | 2025-08-16 | fix: don't lookup create event when converting stripped state | `2025-08-16_03dfa72_fix_stripped_state` |
+| tail | `1f7f74a` | 2025-08-28 | fix(service/media): create directory for media file only on new file creation | `2025-08-28_1f7f74a_media_dir_creation` |
+| tail | `470e477` | 2025-08-28 | refactor(service/admin): improve readability for command processing | `2025-08-28_470e477_admin_refactor` |
+| tail | `5f3bda8` | 2025-08-28 | refactor(service/media): make all fs operations async | `2025-08-28_5f3bda8_media_async_fs` |
+| tail | `6d22701` | 2025-08-28 | feat(service/media): add S3 support | `2025-08-28_6d22701_media_s3_support` |
+| tail | `1c6b2e0` | 2025-09-12 | feat: updated MSC4311 support | `2025-09-12_1c6b2e0_msc4311_updated` |
+| tail | `e757a98` | 2025-09-12 | fix: set previous creators to max power level if "upgraded" room doesn't support creator power level | `2025-09-12_e757a98_upgrade_creator_power` |
+| tail | `3db42bd` | 2025-12-22 | fix: use append_member_pdu for `/invite` | `2025-12-22_3db42bd_federation_invite_refactor` |
+| tail | `346913268f` | 2025-12-30 | fix: don't ignore content of membership template | `2025-12-30_346913268f_membership_template_content` |
+| tail | `82b7cf6261` | 2025-12-30 | fix: use populate_membership_template for `/leave` | `2025-12-30_82b7cf6261_leave_template` |
 | tail | `98e2bed` | 2026-01-22 | fix: don't perform identity assertion on appservice-only endpoints | `2026-01-22_98e2bed_appservice_auth_fix` |
 | tail | `d058dab` | 2026-02-12 | feat: add option to ignore specific server signing keys | `2026-02-12_d058dab_ignored_signing_keys` |
 | tail | `8def22bfb8` | 2026-03-05 | feat: Add user agent string | `2026-03-05_8def22bfb8_fed_user_agent` |
@@ -159,16 +169,14 @@ $ ./build/server
 - All `chore:` / `ci:` / `docs:` / `refactor:` / `perf:` / `style:` commits
 - All Merge commits
 - `Revert` commits where the reverted feature was never implemented (MSC3575 sliding sync)
-- Rust 2024 edition / rust 1.88 / virtual workspace migration (`c3f0ae0`, `51f8e59`, `211e535`)
-- S3 / media_storage infrastructure (`6d22701` is in step 86 but only as config — fine)
+- Rust 2024 edition / rust 1.88 / virtual workspace migration
+- S3 / media_storage infrastructure
 - Systemd lockdown, Docker tag, cross-target-triple, Nix flake, mdbook additions
 
 ## Naming scheme
 
-- **Numbered steps (1-91)**: `NN_HASH_description/` where NN is sequential
-- **Date-based steps (post-91)**: `YYYY-MM-DD_HASH_description/` for Conduit commits from 2026+
+- **Numbered steps (1-54)**: `NN_HASH_description/` where NN is sequential
+- **Date-based steps (post-54)**: `YYYY-MM-DD_HASH_description/` for Conduit commits from 2024+
 
-The boundary between numbered and date-based is Dec 30, 2025. Conduit
-commits from 2026+ are likely to have intervening additions as Conduit
-continues to evolve, so they're kept in a date-sorted tail that can be
-re-ordered without renumbering everything.
+The boundary: anything from 2020 in numbered (in chronological order),
+anything from 2021+ in date-based tail (in date order).

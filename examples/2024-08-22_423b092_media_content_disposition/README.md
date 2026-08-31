@@ -1,0 +1,21 @@
+# 2024/2025-tail — "use ruma content disposition type in place of string" (Conduit `423b092`)
+
+Source: [`timokoesters/conduit@423b092`](https://github.com/timokoesters/conduit/commit/423b092) (2024-08-22)
+
+## What changed vs step 44 (last 2020 step)
+
+| Rust change | C++ translation |
+|---|---|
+| Uses the sanitized content-type in the `Content-Disposition` header rather than just octet-stream. | Translated to C++ with the same wire shape and behavior. |
+
+## Implementation details
+
+- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
+- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+
+## Smoke test
+
+```console
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+$ ./build/server & ./build/tests
+```

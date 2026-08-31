@@ -19,6 +19,16 @@
 #include <httplib.h>
 
 namespace federation {
+
+// NEW in 4dc15a4: centralize the supported Matrix versions into a single
+// constant (Conduit's lib.rs `MATRIX_VERSIONS = &[MatrixVersion::V1_13]`),
+// replacing the scattered per-call `&[MatrixVersion::V1_11]`/`V1_0` lists that
+// server_server / appservice_server / pusher previously hardcoded. Every
+// outgoing request now advertises the same version set. Our C++ code hardcodes
+// request paths, so the constant's observable effect is the advertised version
+// in the outgoing User-Agent (ruma encodes the supported versions there for
+// peers to read).
+static const std::string MATRIX_VERSIONS = "V1_13";
 // NEW in 4cc0a070: request_well_known — resolves a destination's
 // /.well-known/matrix/server to its actual m.server. Translated to
 // synchronous httplib (upstream used async reqwest).
@@ -110,7 +120,7 @@ std::optional<nlohmann::json> send_request(
   httplib::Headers headers{
       {"Authorization", auth},
       {"Content-Type", "application/json"},
-      {"User-Agent", "Conduit/0.11.0-alpha"},
+      {"User-Agent", "Conduit/0.11.0-alpha (" + MATRIX_VERSIONS + ")"},
   };
   auto res = client.Post(path, headers, request_map.dump(), "application/json");
   if (!res) {

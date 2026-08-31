@@ -17,10 +17,8 @@
 
 namespace {
 
-// Folded prerequisite (ddcd423e): real random tokens/devices instead of the
-// early "TODO:" placeholders, so multiple users can be tested at once.
-constexpr std::string_view kPlaceholderDeviceId = "TODO:randomdeviceid";
-
+// Folded prerequisite (ddcd423e): real random tokens/devices, so multiple
+// users can be tested at once.
 std::string new_token() { return utils::random_string(32); }
 
 bool localpart_valid(const std::string& localpart) {

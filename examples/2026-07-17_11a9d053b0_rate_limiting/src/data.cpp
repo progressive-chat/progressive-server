@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <iostream>
 #include <cstdio>
+#include <cstring>
 
 // utils::generate_keypair via update_and_fetch("keypair") semantics.
 static std::string load_or_generate_keypair(sled::Db& storage) {
@@ -19,16 +20,70 @@ Data::Data(const std::filesystem::path& dir)
     : db_storage_(sled::Db::open(dir)), db_(database::Database::open(&db_storage_)) {
   hostname_ = db_storage_.get_root("hostname").value_or("localhost");
   keypair_ = load_or_generate_keypair(db_storage_);
+
+  // NEW in 9db1f5a13c-era: seed admin users from the CONDUIT_ADMINS env var
+  // (comma/space separated list of full user IDs). Mirrors Conduit's `admins`
+  // server config so the admin API has at least one bootstrap administrator.
+  const char* env = std::getenv("CONDUIT_ADMINS");
+  if (env) {
+    std::string s(env);
+    size_t start = 0;
+    while (start < s.size()) {
+      while (start < s.size() && (s[start] == ',' || s[start] == ' ')) ++start;
+      size_t end = start;
+      while (end < s.size() && s[end] != ',' && s[end] != ' ') ++end;
+      if (end > start) admin_add(s.substr(start, end - start));
+      start = end;
+    }
+  }
+
+  // NEW in 66a14ac: media.unauthenticated_access_permitted (default true, which
+  // preserves the previous behaviour). Set the env var to "false" to freeze
+  // unauthenticated media access for subsequently uploaded content.
+  const char* media_unauth = std::getenv("CONDUIT_MEDIA_UNAUTHENTICATED_ACCESS_PERMITTED");
+  if (media_unauth && std::string(media_unauth) == "false") {
+    media_unauthenticated_access_permitted_ = false;
+  }
+
+  // NEW in c3fb1b0: media retention policies. Conduit reads these from
+  // conduit.toml `[[global.media.retention]]`; we read a JSON array of
+  // {scope?, accessed_ms?, created_ms?, space_bytes?} from the env (the
+  // "humantime"/"bytesize" config strings are adapted to plain ms/bytes).
+  const char* retention_env = std::getenv("CONDUIT_MEDIA_RETENTION");
+  if (retention_env && *retention_env) {
+    try {
+      const nlohmann::json j = nlohmann::json::parse(retention_env);
+      if (j.is_array()) {
+        for (const auto& item : j) {
+          database::RetentionPolicy p;
+          if (item.contains("scope") && item["scope"].is_string())
+            p.scope = item["scope"].get<std::string>();
+          if (item.contains("accessed_ms") && item["accessed_ms"].is_number())
+            p.accessed_ms = item["accessed_ms"].get<uint64_t>();
+          if (item.contains("created_ms") && item["created_ms"].is_number())
+            p.created_ms = item["created_ms"].get<uint64_t>();
+          if (item.contains("space_bytes") && item["space_bytes"].is_number())
+            p.space_bytes = item["space_bytes"].get<uint64_t>();
+          media_retention_.push_back(p);
+        }
+      }
+    } catch (...) {
+      media_retention_.clear();
+    }
+  }
 }
 
 Data Data::load_or_create(const std::filesystem::path& dir) { return Data(dir); }
 
 void Data::set_hostname(const std::string& hostname) {
   hostname_ = hostname;
+  admin_alias_ = "#admins:" + hostname;  // NEW in 144d548
   db_storage_.insert_root("hostname", hostname);
 }
 
 const std::string& Data::hostname() const { return hostname_; }
+
+const std::string& Data::admin_alias() const { return admin_alias_; }
 
 void Data::set_well_known_client(const std::string& v) {
   well_known_client_override_ = v;
@@ -111,6 +166,26 @@ std::optional<std::string> Data::device_from_token(const std::string& token) con
   return std::nullopt;
 }
 
+void Data::device_last_seen_update(const std::string& user_id, const std::string& device_id) {
+  const std::string key = user_id + static_cast<char>(0xff) + device_id;
+  const uint64_t now = utils::millis_since_unix_epoch();
+  db_.userdeviceid_lastseen.insert(key, std::to_string(now));
+  device_last_seen_cache_[{user_id, device_id}] = now;
+}
+
+std::optional<uint64_t> Data::device_last_seen_get(const std::string& user_id,
+                                                   const std::string& device_id) const {
+  const auto it = device_last_seen_cache_.find({user_id, device_id});
+  if (it != device_last_seen_cache_.end()) return it->second;
+  auto raw = db_.userdeviceid_lastseen.get(user_id + static_cast<char>(0xff) + device_id);
+  if (!raw) return std::nullopt;
+  try {
+    return std::stoull(*raw);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
 void Data::add_txnid(const std::string& user_id, const std::string& device_id,
                      const std::string& txn_id, const std::string& data) {
   db_.userdevicetxnid_response.insert(
@@ -149,8 +224,8 @@ bool Data::displayname_set(const std::string& user_id,
         {"room_id", room_id},
         {"sender", user_id},
         {"state_key", user_id},
-        {"unsigned", nlohmann::json::object()},
-    };
+       {"unsigned", nlohmann::json::object()},
+  };
     const std::string event_id = crypto::reference_hash(event);
     event["event_id"] = event_id;
     return pdu_append(event_id, room_id, std::move(event));
@@ -158,8 +233,65 @@ bool Data::displayname_set(const std::string& user_id,
   return true;
 }
 
+// --- NEW in 21af83e: state-cache knock tracking -------------------------------
+
+void Data::mark_as_knocked(const std::string& user_id, const std::string& room_id,
+                            const std::string& knock_event_json) {
+  const std::string userroom_key = user_id + '\xff' + room_id;
+  const std::string roomuser_key = room_id + '\xff' + user_id;
+  db_.userroomid_knockstate.insert(userroom_key, knock_event_json);
+  // Increment knock count (big-endian counter, like Conduit's next_count).
+  uint64_t count = 0;
+  if (auto existing = db_.roomuserid_knockcount.get(roomuser_key))
+    count = utils::u64_from_bytes(*existing);
+  ++count;
+  db_.roomuserid_knockcount.insert(roomuser_key, utils::u64_to_bytes(count));
+  // A knock clears any prior "left" membership marker for this user in the room.
+  db_.userid_leftroomids.remove_value(user_id, room_id);
+}
+
+std::optional<uint64_t> Data::get_knock_count(const std::string& room_id,
+                                              const std::string& user_id) const {
+  const std::string key = room_id + '\xff' + user_id;
+  if (auto bytes = db_.roomuserid_knockcount.get(key))
+    return utils::u64_from_bytes(*bytes);
+  return std::nullopt;
+}
+
+std::vector<std::pair<std::string, std::string>> Data::rooms_knocked(
+    const std::string& user_id) const {
+  std::vector<std::pair<std::string, std::string>> out;
+  for (const auto& [key, value] : db_.userroomid_knockstate.scan_prefix(user_id + '\xff')) {
+    // key = user_id + 0xff + room_id
+    const std::string room_id = key.substr(user_id.size() + 1);
+    out.emplace_back(room_id, value);
+  }
+  return out;
+}
+
+std::optional<std::string> Data::knock_state(const std::string& user_id,
+                                             const std::string& room_id) const {
+  const std::string key = user_id + '\xff' + room_id;
+  if (auto v = db_.userroomid_knockstate.get(key)) return *v;
+  return std::nullopt;
+}
+
+bool Data::is_knocked(const std::string& user_id, const std::string& room_id) const {
+  return db_.userroomid_knockstate.contains_key(user_id + '\xff' + room_id);
+}
+
 void Data::displayname_remove(const std::string& user_id) {
   db_.userid_displayname.erase(user_id);
+}
+
+// --- admin (9db1f5a13c-era) ----------------------------------------------------
+
+void Data::admin_add(const std::string& user_id) {
+  db_.admin_users.insert(user_id, "");
+}
+
+bool Data::user_is_admin(const std::string& user_id) const {
+  return db_.admin_users.get(user_id).has_value();
 }
 
 void Data::device_add(const std::string& user_id, const std::string& device_id) {
@@ -190,9 +322,14 @@ void Data::token_replace(const std::string& user_id, const std::string& device_i
 
 // --- membership ----------------------------------------------------------------
 
-bool Data::room_join(const std::string& room_id, const std::string& user_id) {
+ bool Data::room_join(const std::string& room_id, const std::string& user_id) {
   db_.roomid_userids.add(room_id, user_id);
   db_.userid_roomids.add(user_id, room_id);
+
+  // NEW in 21af83e: joining clears any prior knock state for this room.
+  db_.userroomid_knockstate.erase(user_id + '\xff' + room_id);
+  db_.roomuserid_knockcount.erase(room_id + '\xff' + user_id);
+
 
   // NEW in df55e8ed: remember that this user has once joined (used to carry
   // account data / membership across a room upgrade's predecessor).
@@ -261,6 +398,41 @@ bool Data::room_leave(const std::string& room_id, const std::string& user_id,
 
 void Data::room_forget(const std::string& room_id, const std::string& user_id) {
   db_.userid_leftroomids.remove_value(user_id, room_id);
+}
+
+bool Data::room_knock(const std::string& room_id, const std::string& user_id,
+                      const std::string& reason) {
+  // NEW in 21af83e: a knock is an m.room.member state event with
+  // membership "knock"; it does not add the user to the joined set.
+  nlohmann::json content = {{"membership", "knock"}};
+  if (!reason.empty()) content["reason"] = reason;
+  nlohmann::json event = {
+      {"type", "m.room.member"},
+      {"content", std::move(content)},
+      {"event_id", "$thiswillbefilledinlater"},
+      {"origin_server_ts", utils::millis_since_unix_epoch()},
+      {"room_id", room_id},
+      {"sender", user_id},
+      {"state_key", user_id},
+      {"unsigned", nlohmann::json::object()},
+  };
+  const std::string event_id = crypto::reference_hash(event);
+  event["event_id"] = event_id;
+  const bool ok = pdu_append(event_id, room_id, std::move(event));
+  if (ok) {
+    // NEW in 21af83e: also record knock state in the state cache so the knock
+    // can be surfaced in /sync and resolved by an admin invite.
+    nlohmann::json stored = {
+        {"type", "m.room.member"},
+        {"state_key", user_id},
+        {"content", {{"membership", "knock"}, {"reason", reason}}},
+        {"event_id", event_id},
+        {"room_id", room_id},
+        {"sender", user_id},
+    };
+    mark_as_knocked(user_id, room_id, stored.dump());
+  }
+  return ok;
 }
 
 /// NEW in b106d139: database/users.rs remove_device, adapted to our token-
@@ -343,6 +515,106 @@ void Data::update_membership(const std::string& room_id,
   }
 }
 
+// --- NEW in d8badaf: membership reason-aware kick/ban/unban -------------------
+
+std::optional<nlohmann::json> Data::get_member_content(
+    const std::string& room_id, const std::string& user_id) const {
+  std::string key;
+  key.push_back('d');
+  key += room_id;
+  key.push_back(static_cast<char>(0xff));
+  key += "m.room.member";
+  key.push_back(static_cast<char>(0xff));
+  key += user_id;
+  auto text = db_.roomstateid_pdu.get(key);
+  if (!text) return std::nullopt;
+  auto ev = nlohmann::json::parse(*text, nullptr, false);
+  if (ev.is_discarded()) return std::nullopt;
+  return ev.value("content", nlohmann::json::object());
+}
+
+namespace {
+// Build a m.room.member event issued by `sender` targeting `target`.
+nlohmann::json make_member_event(const std::string& sender,
+                                 const std::string& room_id,
+                                 const std::string& target,
+                                 nlohmann::json content) {
+  nlohmann::json event = {
+      {"type", "m.room.member"},
+      {"content", std::move(content)},
+      {"event_id", "$thiswillbefilledinlater"},
+      {"origin_server_ts", utils::millis_since_unix_epoch()},
+      {"room_id", room_id},
+      {"sender", sender},
+      {"state_key", target},
+      {"unsigned", nlohmann::json::object()},
+  };
+  const std::string event_id = crypto::reference_hash(event);
+  event["event_id"] = event_id;
+  return event;
+}
+}  // namespace
+
+bool Data::room_kick(const std::string& sender, const std::string& room_id,
+                     const std::string& target, const std::string& reason) {
+  auto content = get_member_content(room_id, target);
+  // d8badaf: if already left with an unchanged reason, don't emit a new event.
+  if (content && (*content).value("membership", "") == "leave" &&
+      (*content).value("reason", "") == reason) {
+    return true;
+  }
+  nlohmann::json c = {{"membership", "leave"}};
+  if (!reason.empty()) c["reason"] = reason;
+  if (content) {
+    for (const char* f : {"displayname", "avatar_url"})
+      if (auto it = content->find(f); it != content->end()) c[f] = *it;
+  }
+  nlohmann::json ev = make_member_event(sender, room_id, target, std::move(c));
+  bool ok = pdu_append(ev.value("event_id", ""), room_id, std::move(ev));
+  if (ok) update_membership(room_id, target, "leave");
+  return ok;
+}
+
+bool Data::room_ban(const std::string& sender, const std::string& room_id,
+                    const std::string& target, const std::string& reason) {
+  auto content = get_member_content(room_id, target);
+  // d8badaf: if already banned with an unchanged reason, don't emit a new event.
+  if (content && (*content).value("membership", "") == "ban" &&
+      (*content).value("reason", "") == reason) {
+    return true;
+  }
+  nlohmann::json c = {{"membership", "ban"}};
+  if (!reason.empty()) c["reason"] = reason;
+  if (content) {
+    for (const char* f : {"displayname", "avatar_url", "blurhash"})
+      if (auto it = content->find(f); it != content->end()) c[f] = *it;
+  }
+  nlohmann::json ev = make_member_event(sender, room_id, target, std::move(c));
+  bool ok = pdu_append(ev.value("event_id", ""), room_id, std::move(ev));
+  if (ok) update_membership(room_id, target, "ban");
+  return ok;
+}
+
+bool Data::room_unban(const std::string& sender, const std::string& room_id,
+                      const std::string& target, const std::string& reason) {
+  auto content = get_member_content(room_id, target);
+  // d8badaf: if already left with an unchanged reason, don't emit a new event.
+  if (content && (*content).value("membership", "") == "leave" &&
+      (*content).value("reason", "") == reason) {
+    return true;
+  }
+  nlohmann::json c = {{"membership", "leave"}};
+  if (!reason.empty()) c["reason"] = reason;
+  if (content) {
+    for (const char* f : {"displayname", "avatar_url"})
+      if (auto it = content->find(f); it != content->end()) c[f] = *it;
+  }
+  nlohmann::json ev = make_member_event(sender, room_id, target, std::move(c));
+  bool ok = pdu_append(ev.value("event_id", ""), room_id, std::move(ev));
+  if (ok) update_membership(room_id, target, "leave");
+  return ok;
+}
+
 /// NEW in 67a1f21f: hash and set the user's password (Argon2id).
 bool Data::set_password(const std::string& user_id, const std::string& password) {
   auto hash = utils::calculate_hash(password);
@@ -357,6 +629,84 @@ std::vector<std::string> Data::all_device_ids(const std::string& user_id) const 
   return out;
 }
 
+// --- NEW in 42d8e88-backfill: E2E key storage (upload_keys / get_keys) -------
+void Data::add_device_keys(const std::string& user_id, const std::string& device_id,
+                           const nlohmann::json& keys) {
+  db_.userdeviceid_devicekey.insert(user_id + '\xff' + device_id, keys.dump());
+}
+
+std::optional<nlohmann::json> Data::get_device_keys(const std::string& user_id,
+                                                    const std::string& device_id) const {
+  auto v = db_.userdeviceid_devicekey.get(user_id + '\xff' + device_id);
+  if (!v) return std::nullopt;
+  return nlohmann::json::parse(*v, nullptr, false);
+}
+
+void Data::add_one_time_key(const std::string& user_id, const std::string& device_id,
+                            const std::string& key_id, const nlohmann::json& key) {
+  db_.userdeviceid_onetimekey.insert(
+      user_id + '\xff' + device_id + '\xff' + key_id, key.dump());
+}
+
+void Data::remove_one_time_key(const std::string& user_id, const std::string& device_id,
+                               const std::string& key_id) {
+  db_.userdeviceid_onetimekey.erase(user_id + '\xff' + device_id + '\xff' + key_id);
+}
+
+std::map<std::string, nlohmann::json> Data::get_one_time_keys(
+    const std::string& user_id, const std::string& device_id) const {
+  std::map<std::string, nlohmann::json> out;
+  const std::string prefix = user_id + '\xff' + device_id + '\xff';
+  for (const auto& [key, value] : db_.userdeviceid_onetimekey.scan_prefix(prefix)) {
+    // key = user + 0xff + device + 0xff + key_id  -> recover key_id
+    std::string key_id = key.substr(prefix.size());
+    out[key_id] = nlohmann::json::parse(value, nullptr, false);
+  }
+  return out;
+}
+
+int Data::count_one_time_keys(const std::string& user_id,
+                              const std::string& device_id) const {
+  const std::string prefix = user_id + '\xff' + device_id + '\xff';
+  return static_cast<int>(db_.userdeviceid_onetimekey.scan_prefix(prefix).size());
+}
+
+// --- NEW in dc5abd6-backfill: appservice registration storage ----------------
+void Data::appservice_register(const std::string& id, const std::string& url,
+                               const std::string& hs_token,
+                               const std::string& sender) {
+  nlohmann::json reg = nlohmann::json::object();
+  reg["id"] = id;
+  reg["url"] = url;
+  reg["hs_token"] = hs_token;
+  reg["sender"] = sender;
+  db_.appserviceid_registration.insert(id, reg.dump());
+  db_.appservice_token_id.insert(hs_token, id);
+}
+
+std::optional<nlohmann::json> Data::appservice_by_id(const std::string& id) const {
+  auto v = db_.appserviceid_registration.get(id);
+  if (!v) return std::nullopt;
+  return nlohmann::json::parse(*v, nullptr, false);
+}
+
+std::optional<std::string> Data::appservice_id_from_token(
+    const std::string& token) const {
+  return db_.appservice_token_id.get(token);
+}
+
+// NEW in 6e5b35ea: iterate all appservices for event dispatch.
+std::vector<nlohmann::json> Data::appservice_all() const {
+  std::vector<nlohmann::json> out;
+  for (const auto& [id, reg_str] : db_.appserviceid_registration.iter_all()) {
+    auto parsed = nlohmann::json::parse(reg_str, nullptr, false);
+    if (!parsed.is_discarded() && parsed.is_object()) {
+      out.push_back(std::move(parsed));
+    }
+  }
+  return out;
+}
+
 
 /// NEW in b8193984: deactivate account — remove all devices, blank password.
 void Data::deactivate_account(const std::string& user_id) {
@@ -368,13 +718,48 @@ void Data::deactivate_account(const std::string& user_id) {
 }
 
 std::optional<std::string> Data::token_for_device(const std::string& user_id,
-                                                  const std::string& device_id) const {
+                                                   const std::string& device_id) const {
   return db_.userdeviceid_token.get(user_id + '\xff' + device_id);
 }
 
+// --- NEW in a888c7cb16: OpenID tokens ----------------------------------------
+
+static constexpr uint64_t kOpenidTokenTtl = 3600;  // seconds (Conduit default)
+
+std::pair<std::string, uint64_t> Data::create_openid_token(
+    const std::string& user_id) {
+  // token -> (expires_at, user_id)
+  const std::string token = utils::random_string(24);
+  const uint64_t expires_in = kOpenidTokenTtl;
+  const uint64_t expires_at =
+      utils::millis_since_unix_epoch() + expires_in * 1000;
+
+  std::string value;
+  value.append(reinterpret_cast<const char*>(&expires_at), sizeof(expires_at));
+  value += user_id;
+  db_.openidtoken_userid.insert(token, value);
+  return {token, expires_in};
+}
+
+std::optional<std::string> Data::find_from_openid_token(const std::string& token) {
+  const auto value = db_.openidtoken_userid.get(token);
+  if (!value) return std::nullopt;
+  if (value->size() < sizeof(uint64_t)) return std::nullopt;
+  uint64_t expires_at = 0;
+  std::memcpy(&expires_at, value->data(), sizeof(uint64_t));
+  if (expires_at < utils::millis_since_unix_epoch()) {
+    db_.openidtoken_userid.erase(token);
+    return std::nullopt;
+  }
+  return value->substr(sizeof(uint64_t));
+}
+
+
 // --- NEW in 3aa0c8ed / 9c26e22a: aliases & visibility --------------------------
 
-void Data::set_alias(const std::string& alias, const std::string& room_id) {
+void Data::set_alias(const std::string& alias, const std::string& room_id,
+                     const std::string& user_id) {
+  db_.alias_creator.insert(alias, user_id);  // NEW in 144d548 (first, no stuck alias)
   db_.alias_roomid.insert(alias, room_id);
   std::string aliasid = room_id;
   const std::string index_bytes =
@@ -392,14 +777,20 @@ void Data::set_alias(const std::string& alias, const std::string& room_id) {
   db_.aliasid_alias.insert(key, alias);
 }
 
-void Data::remove_alias(const std::string& alias) {
+void Data::remove_alias(const std::string& alias,
+                        [[maybe_unused]] const std::string& user_id) {
   db_.alias_roomid.erase(alias);
+  db_.alias_creator.erase(alias);  // NEW in 144d548
   for (const auto& [key, val] : db_.aliasid_alias.iter_all())
     if (val == alias) db_.aliasid_alias.erase(key);
 }
 
 std::optional<std::string> Data::id_from_alias(const std::string& alias) const {
   return db_.alias_roomid.get(alias);
+}
+
+std::optional<std::string> Data::who_created_alias(const std::string& alias) const {
+  return db_.alias_creator.get(alias);  // NEW in 144d548
 }
 
 std::vector<std::string> Data::room_aliases(const std::string& room_id) const {
@@ -444,6 +835,17 @@ std::optional<nlohmann::json> Data::room_state_get(const std::string& room_id,
     auto pdu = nlohmann::json::parse(pdu_text);
     if (pdu.value("type", "") == type && pdu.value("state_key", "") == state_key)
       return pdu["content"];
+  }
+  return std::nullopt;
+}
+
+// NEW in 532b17a (MSC4311): Get the full m.room.create event PDU for a room.
+// Returns the full PDU JSON string if found, nullopt otherwise.
+std::optional<std::string> Data::room_create_event(const std::string& room_id) const {
+  for (const auto& pdu_text : room_state(room_id)) {
+    auto pdu = nlohmann::json::parse(pdu_text);
+    if (pdu.value("type", "") == "m.room.create" && pdu.value("state_key", "") == "")
+      return pdu_text;
   }
   return std::nullopt;
 }
@@ -607,6 +1009,12 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
       } else if (target_membership == "ban") {
         if (sender_membership != "join") authorized = false;
         else authorized = sender_power_val >= ban_level && target_power < sender_power_val;
+      } else if (target_membership == "knock") {
+        // NEW in 21af83e: a user may only knock for themselves, and only in a
+        // room whose join rule permits knocking.
+        if (sender != target_user) authorized = false;
+        else if (join_rule != "knock") authorized = false;
+        else authorized = true;
       }
     } else if (type == "m.room.create") {
       authorized = prev_events.empty();
@@ -636,7 +1044,34 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
   event["prev_events"] = prev_events;
   event["origin"] = hostname_;
   event["depth"] = depth;
-  event["auth_events"] = nlohmann::json::array({"$auth_eventid"});  // still TODO upstream
+  // Compute the auth-event chain from the room's current state (Matrix spec):
+  // m.room.create, m.room.power_levels, m.room.join_rules, the sender's own
+  // m.room.member, and — for m.room.member events — the target's membership.
+  {
+    nlohmann::json auth_events = nlohmann::json::array();
+    const std::string ev_type = event.value("type", "");
+    const std::string ev_sender = event.value("sender", "");
+    const std::string ev_state_key = event.value("state_key", "");
+    for (const auto& state_text : room_state(room_id)) {
+      auto st = nlohmann::json::parse(state_text, nullptr, false);
+      if (st.is_discarded()) continue;
+      const std::string t = st.value("type", "");
+      const std::string sk = st.value("state_key", "");
+      bool is_auth = false;
+      if (t == "m.room.create" || t == "m.room.power_levels" ||
+          t == "m.room.join_rules") {
+        is_auth = true;
+      } else if (t == "m.room.member") {
+        if (sk == ev_sender) is_auth = true;
+        if (ev_type == "m.room.member" && sk == ev_state_key) is_auth = true;
+      }
+      if (is_auth) {
+        const std::string aid = st.value("event_id", "");
+        if (!aid.empty()) auth_events.push_back(aid);
+      }
+    }
+    event["auth_events"] = std::move(auth_events);
+  }
 
   // NEW in 4cc0a070: state events carry unsigned.prev_content with the old
   // content (upstream notes: TODO optimize — loads the whole room state).
@@ -753,13 +1188,95 @@ std::vector<std::string> Data::room_servers(const std::string& room_id) const {
 
 // --- NEW in 821c608c: media repository -----------------------------------------
 
-void Data::media_create(const std::string& mxc, const std::optional<std::string>& filename,
-                        const std::string& content_type, const std::string& file) {
-  db_.media.create(mxc, filename, content_type, file);
+void Data::media_create(const std::string& server_name, const std::string& media_id,
+                        const std::optional<std::string>& filename,
+                        const std::optional<std::string>& content_type, const std::string& file,
+                        const std::optional<std::string>& user_id) {
+  db_.media.create(server_name, media_id, filename, content_type, file,
+                   media_unauthenticated_access_permitted_, user_id);
 }
 
-std::optional<database::Media::File> Data::media_get(const std::string& mxc) const {
-  return db_.media.get(mxc);
+std::optional<database::Media::File> Data::media_get(const std::string& server_name,
+                                                     const std::string& media_id,
+                                                     bool authenticated) {
+  return db_.media.get(server_name, media_id, authenticated);
+}
+
+bool Data::media_remove(const std::string& server_name, const std::string& media_id, bool force) {
+  return db_.media.remove(server_name, media_id, force);
+}
+
+size_t Data::media_remove_by_user(const std::string& server_name, const std::string& user_id,
+                                  bool force, const std::optional<uint64_t>& after_ms) {
+  return db_.media.remove_by_user(server_name, user_id, force, after_ms);
+}
+
+size_t Data::media_remove_by_server(const std::string& server_name, bool force,
+                                    const std::optional<uint64_t>& after_ms) {
+  return db_.media.remove_by_server(server_name, force, after_ms);
+}
+
+bool Data::media_is_blocked(const std::string& server_name, const std::string& media_id) const {
+  return db_.media.is_blocked(server_name, media_id);
+}
+
+void Data::media_block(const std::string& server_name, const std::string& media_id,
+                       const std::string& reason) {
+  db_.media.block(server_name, media_id, reason, utils::millis_since_unix_epoch() / 1000);
+}
+
+size_t Data::media_block_by_user(const std::string& server_name, const std::string& user_id,
+                                 const std::string& reason,
+                                 const std::optional<uint64_t>& after_secs) {
+  return db_.media.block_by_user(server_name, user_id, reason,
+                                 utils::millis_since_unix_epoch() / 1000, after_secs);
+}
+
+bool Data::media_unblock(const std::string& server_name, const std::string& media_id) {
+  return db_.media.unblock(server_name, media_id);
+}
+
+std::vector<database::Media::BlockedMediaInfo> Data::media_list_blocked() const {
+  return db_.media.list_blocked();
+}
+
+size_t Data::media_cleanup_time_retention() {
+  return db_.media.cleanup_time_retention(media_retention_);
+}
+
+size_t Data::media_clear_required_space(bool thumbnail, uint64_t new_size) {
+  return db_.media.clear_required_space(media_retention_, thumbnail, new_size);
+}
+
+const std::vector<database::RetentionPolicy>& Data::media_retention() const {
+  return media_retention_;
+}
+
+std::optional<database::Media::MediaQuery> Data::media_query(
+    const std::string& server_name, const std::string& media_id) const {
+  return db_.media.media_query(server_name, media_id);
+}
+
+std::vector<database::Media::MediaListItem> Data::media_list(
+    const std::optional<std::string>& server_name,
+    const std::optional<std::string>& user_id,
+    const std::optional<std::string>& content_type,
+    const std::optional<uint64_t>& before_ms,
+    const std::optional<uint64_t>& after_ms) const {
+  return db_.media.media_list(server_name, user_id, content_type, before_ms, after_ms);
+}
+
+uint64_t Data::media_cleanup_interval_ms() const {
+  // Conduit cleans every 1/10th of the shortest retention time, clamped to
+  // [60s, 24h]. Compute from the accessed/created policies.
+  uint64_t shortest = ~0ull;
+  for (const auto& p : media_retention_) {
+    if (p.accessed_ms) shortest = std::min(shortest, *p.accessed_ms);
+    if (p.created_ms) shortest = std::min(shortest, *p.created_ms);
+  }
+  uint64_t interval = shortest == ~0ull ? 24ull * 3600 * 1000 : shortest / 10;
+  interval = std::max<uint64_t>(60000, std::min<uint64_t>(interval, 24ull * 3600 * 1000));
+  return interval;
 }
 
 bool Data::room_pdu_first(const std::string& room_id, uint64_t pdu_index) const {
@@ -878,7 +1395,12 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   event["event_id"] = event_id;
   pdu_append(event_id, room_id, std::move(event));
 
+  // NEW in 21af83e: resolving a knock (by invite) clears the knock state.
+  db_.userroomid_knockstate.erase(user_id + '\xff' + room_id);
+  db_.roomuserid_knockcount.erase(room_id + '\xff' + user_id);
+
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {
@@ -1024,4 +1546,30 @@ void Data::backup_delete_room_key(const std::string& user_id, const std::string&
                                  const std::string& room_id, const std::string& session_id) {
   std::string k = user_id + '\xff' + version + '\xff' + room_id + '\xff' + session_id;
   db_.backupkeyid_backup.erase(k);
+}
+
+// NEW in b5e3185: room version rules (MSC4289/4291)
+const Data::RoomVersionRules Data::DEFAULT_ROOM_VERSION_RULES = {
+    "1",  // version
+    true,  // explicitly_privilege_room_creators
+    false, // additional_room_creators
+    false  // use_room_create_sender
+};
+
+Data::RoomVersionRules Data::get_room_version_rules(const std::string& version) {
+  // Room version "1" - legacy behavior
+  if (version == "1") {
+    return DEFAULT_ROOM_VERSION_RULES;
+  }
+  // Room version "12" - MSC4289 + MSC4291 + MSC4297
+  if (version == "12") {
+    return Data::RoomVersionRules{
+        "12",
+        true,  // explicitly_privilege_room_creators
+        true,  // additional_room_creators
+        true   // use_room_create_sender
+    };
+  }
+  // Unknown version -> default to legacy behavior
+  return DEFAULT_ROOM_VERSION_RULES;
 }

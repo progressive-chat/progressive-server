@@ -47,6 +47,8 @@ struct RegisterRequest {
   std::optional<std::string> username;
   std::optional<std::string> password;
   std::optional<std::string> device_id;
+  // NEW in 6e5b35ea: appservice bridges set this to true.
+  bool from_appservice = false;
 };
 
 struct RegisterResponse {
@@ -120,6 +122,7 @@ struct SyncResponse {
   bool limited = false;    // NEW in b4d65ab6: true on a room's first sync
   std::map<std::string, SyncResponse> joined;
   std::map<std::string, SyncResponse> invited;
+  std::map<std::string, SyncResponse> knocked;  // NEW in 21af83e: knocked rooms
   std::vector<std::string> stripped_state;
 };
 
@@ -145,7 +148,14 @@ struct CreateRoomRequest {
   std::vector<std::string> invite;
   std::string visibility;         // NEW in 3aa0c8ed: "public" | "private"
   std::optional<std::string> room_alias_name;  // NEW in 3aa0c8ed
+  std::optional<std::string> preset;  // "public_chat" | "private_chat" | "trusted_private_chat"
+  // NEW in b5e3185 (MSC4289): list of additional creators
+  std::optional<std::vector<std::string>> additional_creators;
+  // NEW in 660dd9c: room version to use for the new room
+  std::optional<std::string> room_version;
   std::string user_id;  // resolved from token
+  // NEW in 6e5b35ea: appservice bridges set this to true.
+  bool from_appservice = false;
 };
 
 // NEW in 3aa0c8ed: PUT /directory/room/<alias>

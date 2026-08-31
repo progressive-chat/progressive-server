@@ -29,6 +29,9 @@ Ruma<RegisterRequest> Ruma<RegisterRequest>::from_request(const httplib::Request
         parsed.password = it->get<std::string>();
       if (auto it = body.find("device_id"); it != body.end() && it->is_string())
         parsed.device_id = it->get<std::string>();
+      // NEW in 6e5b35ea: from_appservice
+      if (auto it = body.find("from_appservice"); it != body.end() && it->is_boolean())
+        parsed.from_appservice = it->get<bool>();
     }
   }
   Ruma<RegisterRequest> wrapper;
@@ -242,6 +245,24 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
   for (const auto& [room_id, room] : r.invited)
     if (!room.stripped_state.empty()) invite[room_id] = invited_room_json(room);
 
+  // NEW in 21af83e: knocked rooms surface the stored knock state event.
+  auto knocked_room_json = [](const SyncResponse& room) {
+    json events = json::array();
+    for (const auto& pdu : room.stripped_state) {
+      auto full = json::parse(pdu);
+      events.push_back({
+          {"content", full.value("content", json::object())},
+          {"sender", full.value("sender", "")},
+          {"state_key", full.value("state_key", "")},
+          {"type", full.value("type", "")},
+      });
+    }
+    return json{{"knock_state", {{"events", std::move(events)}}}};
+  };
+  json knock = json::object();
+  for (const auto& [room_id, room] : r.knocked)
+    if (!room.stripped_state.empty()) knock[room_id] = knocked_room_json(room);
+
   // Always use the modern multi-room shape; an empty account yields empty maps.
   if (true) {
     json out = {
@@ -249,6 +270,7 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
         {"rooms",
          {{"invite", std::move(invite)},
           {"join", std::move(join)},
+          {"knock", std::move(knock)},
           {"leave", json::object()}}},
         {"to_device", {{"events", json::array()}}},
     };
@@ -301,6 +323,20 @@ Ruma<CreateRoomRequest> Ruma<CreateRoomRequest>::from_request(const httplib::Req
         wrapper.value.visibility = it->get<std::string>();
       if (auto it = body.find("room_alias_name"); it != body.end() && it->is_string())
         wrapper.value.room_alias_name = it->get<std::string>();
+      if (auto it = body.find("preset"); it != body.end() && it->is_string())
+        wrapper.value.preset = it->get<std::string>();
+      // NEW in b5e3185 (MSC4289): additional_creators
+      if (auto it = body.find("additional_creators"); it != body.end() && it->is_array()) {
+        wrapper.value.additional_creators = std::vector<std::string>();
+        for (const auto& u : *it)
+          if (u.is_string()) wrapper.value.additional_creators->push_back(u.get<std::string>());
+      }
+      // NEW in 660dd9c: room_version
+      if (auto it = body.find("room_version"); it != body.end() && it->is_string())
+        wrapper.value.room_version = it->get<std::string>();
+      // NEW in 6e5b35ea: from_appservice
+      if (auto it = body.find("from_appservice"); it != body.end() && it->is_boolean())
+        wrapper.value.from_appservice = it->get<bool>();
     }
   }
   return wrapper;

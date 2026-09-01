@@ -575,6 +575,8 @@ void init_server_config() {
         "Federation rate limiting reject limit", "default"});
     g_config_entries.push_back({"federation_rc_concurrent", "3", false, "federation",
         "Maximum concurrent federation connections per server", "default"});
+    g_config_entries.push_back({"allow_check_for_updates", "true", false, "federation",
+        "Enable checking for Conduit/Progressive updates from upstream", "yaml"});
 
     // =========================================================================
     // Caches config

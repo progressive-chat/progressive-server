@@ -338,3 +338,41 @@ std::unique_ptr<LoggingDatabaseConnection> make_conn(
     const std::string&, const std::string&) { return nullptr; }
 
 }  // namespace progressive::storage
+
+// ============================================================================
+// Version checker database functions
+// ============================================================================
+
+namespace progressive::storage {
+
+uint64_t get_last_check_for_updates_id(DatabasePool& db_pool) {
+    try {
+        auto txn = db_pool.create_connection("");
+        auto raw_txn = txn->cursor("get_last_check_for_updates_id");
+        LoggingTransaction txn(std::move(raw_txn), "get_last_check_for_updates_id", "", db_pool.engine());
+        
+        auto row = txn.fetchone();
+        if (row && !row.empty()) {
+            return std::stoull(row[0]);
+        }
+    } catch (const std::exception& e) {
+        // Log error but don't crash
+    }
+    return 0;
+}
+
+void set_last_check_for_updates_id(DatabasePool& db_pool, uint64_t id) {
+    try {
+        auto txn = db_pool.create_connection("");
+        auto raw_txn = txn->cursor("set_last_check_for_updates_id");
+        LoggingTransaction txn(std::move(raw_txn), "set_last_check_for_updates_id", "", db_pool.engine());
+        
+        txn.execute("INSERT OR REPLACE INTO version_checker (key, value) VALUES ('last_check_for_updates_id', ?)", 
+                     {std::to_string(id)});
+        txn.commit();
+    } catch (const std::exception& e) {
+        // Log error but don't crash
+    }
+}
+
+}  // namespace progressive::storage

@@ -368,6 +368,7 @@ struct FederationConfigSection {
     std::string tls_key_path;
     std::vector<std::string> federation_whitelist;
     std::vector<std::string> federation_blacklist;
+    bool allow_check_for_updates{true};
 };
 
 struct DatabaseConfig {
@@ -448,11 +449,13 @@ struct BackgroundTasksConfig {
     int64_t stats_aggregation_interval_ms{60000};
     int64_t server_acl_update_interval_ms{60000};
     int64_t remote_media_cleanup_interval_ms{86400000};
+    int64_t version_checker_interval_ms{3600000};  // 1 hour default
     bool presence_cleanup_enabled{true};
     bool ephemeral_cleanup_enabled{true};
     bool expired_media_enabled{true};
     bool federation_retry_enabled{true};
     bool stats_aggregation_enabled{true};
+    bool version_checker_enabled{true};
 };
 
 struct HealthCheckConfig {
@@ -622,6 +625,7 @@ public:
                     for (auto& s : f["federation_blacklist"])
                         cfg.federation.federation_blacklist.push_back(s.as<std::string>());
                 }
+                if (f["allow_check_for_updates"]) cfg.federation.allow_check_for_updates = f["allow_check_for_updates"].as<bool>();
             }
 
             // Database section
@@ -2602,6 +2606,9 @@ public:
         if (cfg_.stats_aggregation_enabled) {
             tasks_.emplace_back([this]() { stats_aggregation_loop(); });
         }
+        if (cfg_.version_checker_enabled) {
+            tasks_.emplace_back([this]() { version_checker_loop(); });
+        }
         tasks_.emplace_back([this]() { metrics_flush_loop(); });
         tasks_.emplace_back([this]() { rate_limit_cleanup_loop(); });
 
@@ -2625,6 +2632,7 @@ public:
     void set_expired_media_fn(std::function<void()> fn) { expired_media_fn_ = std::move(fn); }
     void set_federation_retry_fn(std::function<void()> fn) { federation_retry_fn_ = std::move(fn); }
     void set_stats_aggregation_fn(std::function<void()> fn) { stats_aggregation_fn_ = std::move(fn); }
+    void set_version_checker_fn(std::function<void()> fn) { version_checker_fn_ = std::move(fn); }
 
 private:
     void presence_cleanup_loop() {
@@ -2717,6 +2725,20 @@ private:
         }
     }
 
+    void version_checker_loop() {
+        while (running_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(cfg_.version_checker_interval_ms));
+            if (!running_) break;
+            try {
+                LOG_TRACE("bg", "Running version checker");
+                MetricsCollector::instance().increment("background_tasks_version_checker_total");
+                if (version_checker_fn_) version_checker_fn_();
+            } catch (const std::exception& e) {
+                LOG_ERROR("bg", std::string("Version checker error: ") + e.what());
+            }
+        }
+    }
+
     BackgroundTasksConfig cfg_;
     std::atomic<bool> running_{false};
     std::vector<std::function<void()>> tasks_;
@@ -2727,6 +2749,7 @@ private:
     std::function<void()> expired_media_fn_;
     std::function<void()> federation_retry_fn_;
     std::function<void()> stats_aggregation_fn_;
+    std::function<void()> version_checker_fn_;
 };
 
 // ============================================================================
@@ -3261,6 +3284,7 @@ public:
         bg_scheduler_->set_expired_media_fn([this]() { cleanup_expired_media(); });
         bg_scheduler_->set_federation_retry_fn([this]() { retry_federation(); });
         bg_scheduler_->set_stats_aggregation_fn([this]() { aggregate_stats(); });
+        bg_scheduler_->set_version_checker_fn([this]() { check_for_updates(); });
 
         // 11. Register signal handlers
         setup_signal_handlers();
@@ -3904,6 +3928,76 @@ private:
         size_t size, resident, shared, text, lib, data, dt;
         statm >> size >> resident >> shared >> text >> lib >> data >> dt;
         return resident * sysconf(_SC_PAGESIZE);
+    }
+
+    void check_for_updates() {
+        // Check if version checking is enabled
+        if (!cfg_.federation.allow_check_for_updates) {
+            return;
+        }
+
+        try {
+            // Get the last check ID from database
+            uint64_t last_check_id = 0;
+            try {
+                db_mgr_->main().runInteraction("get_last_check_id", [&last_check_id](storage::LoggingTransaction& txn) {
+                    auto row = txn.fetchone();
+                    if (row && !row.empty()) {
+                        last_check_id = std::stoull(row[0]);
+                    }
+                });
+            } catch (const std::exception& e) {
+                LOG_WARN("bg", "Failed to get last check ID: " + std::string(e.what()));
+            }
+
+            // Make HTTP request to check for updates
+            auto client = http_client::HttpClient::create();
+            auto response = client->get("https://progressive.rs/check-for-updates/stable");
+            
+            if (!response || response->code != 200) {
+                LOG_WARN("bg", "Failed to check for updates");
+                return;
+            }
+
+            json updates_json = json::parse(response->body);
+            
+            // Update the last check ID
+            uint64_t max_id = last_check_id;
+            
+            if (updates_json.contains("updates") && updates_json["updates"].is_array()) {
+                for (const auto& update : updates_json["updates"]) {
+                    uint64_t update_id = update.value("id", 0);
+                    max_id = std::max(max_id, update_id);
+                    
+                    if (update_id > last_check_id) {
+                        std::string message = update.value("message", "");
+                        std::string date = update.value("date", "");
+                        
+                        // Log the update message (in a full implementation, this would be sent to admin room)
+                        if (!message.empty()) {
+                            LOG_INFO("bg", "Update available: " + message + " (date: " + date + ")");
+                        }
+                    }
+                }
+            }
+            
+            // Update the last check ID in database
+            try {
+                db_mgr_->main().runInteraction("update_last_check_id", [max_id](storage::LoggingTransaction& txn) {
+                    txn.execute(
+                        "INSERT OR REPLACE INTO version_checker (key, value) VALUES ('last_check_for_updates_id', ?)",
+                        {storage::SQLParam(std::to_string(max_id))}
+                    );
+                });
+            } catch (const std::exception& e) {
+                LOG_WARN("bg", "Failed to update last check ID: " + std::string(e.what()));
+            }
+
+            MetricsCollector::instance().increment("version_checker_runs");
+            
+        } catch (const std::exception& e) {
+            LOG_ERROR("bg", std::string("Version check failed: ") + e.what());
+        }
     }
 
     // ========================================================================

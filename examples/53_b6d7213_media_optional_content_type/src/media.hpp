@@ -1,0 +1,51 @@
+// media.hpp — translation of Conduit commit 821c608c's src/database/media.rs
+//
+//   pub struct Media { mediaid_file: sled::Tree }  // MXC + Filename + ContentType
+//
+//   create(mxc, filename, content_type, file): store under one key
+//   get(mxc): first entry with prefix mxc+0xff -> (filename, content_type, file)
+//   upload_thumbnail(mxc, filename, content_type, width, height, file): store thumbnail with dimensions
+
+#pragma once
+
+#include "sled.hpp"
+
+#include <optional>
+#include <string>
+
+namespace database {
+
+class Media {
+ public:
+  explicit Media(sled::Tree tree) : tree_(std::move(tree)) {}
+
+  /// Uploads or replaces a file.
+  void create(const std::string& mxc, const std::optional<std::string>& filename,
+              const std::string& content_type, const std::string& file);
+
+  /// Uploads or replaces a thumbnail.
+  void upload_thumbnail(const std::string& mxc,
+                        const std::optional<std::string>& filename,
+                        const std::string& content_type,
+                        uint32_t width, uint32_t height,
+                        const std::string& file);
+
+  /// NEW in 6bb8284: Returns width, height of the thumbnail and whether it
+  /// should be cropped. Returns None when the server should send the original
+  /// file. Standard thumbnail sizes: 32x32, 96x96, 320x240, 640x480, 800x600.
+  std::optional<std::tuple<uint32_t, uint32_t, bool>> thumbnail_properties(
+      uint32_t width, uint32_t height) const;
+
+  /// Downloads a file: (filename, content_type, bytes).
+  struct File {
+    std::optional<std::string> filename;
+    std::optional<std::string> content_type;
+    std::string bytes;
+  };
+  std::optional<File> get(const std::string& mxc) const;
+
+ private:
+  sled::Tree tree_;
+};
+
+}  // namespace database

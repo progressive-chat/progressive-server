@@ -129,6 +129,9 @@ ruma::MatrixResult<ruma::LoginResponse> login_route(Context* ctx,
   }
 
   std::string username = *body.user_localpart;
+  // NEW in 9f059ad4: make username login case insensitive
+  std::transform(username.begin(), username.end(), username.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
   if (username.find(':') == std::string::npos) {
     username = "@" + username + ":" + ctx->data->hostname();
   }

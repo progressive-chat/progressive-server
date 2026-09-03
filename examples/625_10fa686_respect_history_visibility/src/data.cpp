@@ -287,6 +287,35 @@ bool Data::is_joined(const std::string& user_id, const std::string& room_id) con
   return false;
 }
 
+/// NEW in 10fa686: Get the history_visibility setting for a room (default: "shared")
+std::string Data::room_history_visibility(const std::string& room_id) const {
+  if (auto state = room_state_get(room_id, "m.room.history_visibility", "")) {
+    return state->value("content", nlohmann::json::object())
+               .value("history_visibility", "shared");
+  }
+  return "shared";  // Default per spec
+}
+
+/// NEW in 10fa686: Check if a user can see state events in a room (for /state, /members, etc.)
+bool Data::user_can_see_state_events(const std::string& user_id,
+                                     const std::string& room_id) const {
+  bool currently_member = is_joined(user_id, room_id);
+  std::string history_visibility = room_history_visibility(room_id);
+  return currently_member || history_visibility == "world_readable";
+}
+
+/// NEW in 10fa686: Check if a user can see a specific event based on room's history_visibility.
+// For simplicity, we check the current room state's history_visibility.
+// A full implementation would check the history_visibility at the event's state.
+bool Data::user_can_see_event(const std::string& user_id,
+                              const std::string& room_id,
+                              const std::string& event_id) const {
+  // For now, delegate to user_can_see_state_events which checks current state
+  // A full implementation would look up the event's state hash and check
+  // history_visibility at that point in time
+  return user_can_see_state_events(user_id, room_id);
+}
+
 std::optional<std::string> Data::membership_of(const std::string& room_id,
                                                const std::string& user_id) const {
   std::string key;
@@ -942,6 +971,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

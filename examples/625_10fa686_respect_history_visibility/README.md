@@ -6,12 +6,27 @@ Source: [`timokoesters/conduit@10fa686`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Feat: respect history visibility. History visibility rules for room events. 8 files changed. MAJOR feature. | **Translated** — We don't have history visibility yet. This adds the feature. |
+| Feat: respect history visibility. History visibility rules for room events. 8 files changed. MAJOR feature. | **Translated** — Added history visibility checks for room events. |
 
 ## Implementation details
 
-- We don't have history visibility yet. This adds the feature.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+- **data.hpp/data.cpp**: Added methods:
+  - `room_history_visibility(room_id)` - gets the history_visibility setting (default: "shared")
+  - `user_can_see_state_events(user_id, room_id)` - checks if user can see state events in a room
+  - `user_can_see_event(user_id, room_id, event_id)` - checks if user can see a specific event
+
+- **main.cpp**: Updated routes to use history visibility checks:
+  - `/rooms/{room_id}/members` - uses `user_can_see_state_events`
+  - `/rooms/{room_id}/state/{type}[/{state_key}]` - uses `user_can_see_state_events`
+  - `/rooms/{room_id}/event/{event_id}` - uses `user_can_see_event` with proper error message
+
+- History visibility levels handled:
+  - `world_readable` - anyone can see
+  - `shared` (default) - only joined members can see
+  - `invited` - only invited members can see (simplified to joined for now)
+  - `joined` - only joined members can see
+
+**Status:** Real implementation (simplified - uses current state's history_visibility rather than event's state hash).
 
 ## Smoke test
 

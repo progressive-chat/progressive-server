@@ -1185,7 +1185,7 @@ int main(int argc, char** argv) {
               return;
             }
             const std::string room_id = req.matches[1];
-            if (!ctx.data->is_joined(*user, room_id)) {
+            if (!ctx.data->user_can_see_state_events(*user, room_id)) {
               ruma::respond(
                   res,
                   nlohmann::json{
@@ -1215,7 +1215,7 @@ int main(int argc, char** argv) {
     const std::string room_id = req.matches[1];
     const std::string type = req.matches[2];
     const std::string state_key = req.matches.size() > 3 ? req.matches[3].str() : "";
-    if (!ctx.data->is_joined(*user, room_id)) {
+    if (!ctx.data->user_can_see_state_events(*user, room_id)) {
       ruma::respond(res, ruma::json{{"errcode", "M_FORBIDDEN"},
                                     {"error", "You don't have permission to view this room."}}, 403);
       return;
@@ -1248,12 +1248,12 @@ int main(int argc, char** argv) {
             }
             const std::string room_id = req.matches[1];
             const std::string event_id = req.matches[2];
-            if (!ctx.data->is_joined(*user, room_id)) {
+            if (!ctx.data->user_can_see_event(*user, room_id, event_id)) {
               ruma::respond(
                   res,
                   nlohmann::json{
                       {"errcode", "M_FORBIDDEN"},
-                      {"error", "You don't have permission to view this room."}},
+                      {"error", "You don't have permission to view this event."}},
                   403);
               return;
             }

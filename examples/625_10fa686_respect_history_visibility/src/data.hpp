@@ -189,6 +189,18 @@ class Data {
                                                const std::string& state_key) const;
   bool is_public(const std::string& room_id) const;
 
+  // --- NEW in 10fa686: history visibility --------------------------------------
+  /// Check if a user can see a specific event based on room's history_visibility.
+  /// Returns true if allowed, false if denied.
+  bool user_can_see_event(const std::string& user_id,
+                          const std::string& room_id,
+                          const std::string& event_id) const;
+  /// Check if a user can see state events in a room (for /state, /members, etc.)
+  bool user_can_see_state_events(const std::string& user_id,
+                                 const std::string& room_id) const;
+  /// Get the history_visibility setting for a room (default: "shared")
+  std::string room_history_visibility(const std::string& room_id) const;
+
   /// NEW in 821c608c: media repository access.
   void media_create(const std::string& mxc, const std::optional<std::string>& filename,
                     const std::string& content_type, const std::string& file);

@@ -212,6 +212,18 @@ std::vector<std::string> Data::rooms_joined(const std::string& user_id) const {
   return rooms;
 }
 
+// NEW in 3c26166: returns the list of user_ids that are members of a room.
+// In Conduit this is used by /sync to extend device_list_updates with all
+// members of shared encrypted rooms, so each member gets notified of the
+// sender's device list changes.
+std::vector<std::string> Data::room_members(const std::string& room_id) const {
+  std::vector<std::string> members;
+  for (const auto& [key, value] : db_.roomid_userids.get_iter(room_id)) {
+    members.push_back(value);
+  }
+  return members;
+}
+
 bool Data::room_leave(const std::string& room_id, const std::string& user_id) {
   // Remove membership entries (inverse lookups via remove_value).
   for (const auto& [k, v] : db_.roomid_userids.get_iter(room_id))

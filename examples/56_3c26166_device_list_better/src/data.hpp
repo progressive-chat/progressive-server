@@ -67,6 +67,9 @@ class Data {
   void room_forget(const std::string& room_id, const std::string& user_id);
   size_t room_users(const std::string& room_id) const;
   std::vector<std::string> rooms_joined(const std::string& user_id) const;
+  // NEW in 3c26166: returns the list of user_ids that are members of a room.
+  // Used by /sync to build device_list_updates for shared encrypted rooms.
+  std::vector<std::string> room_members(const std::string& room_id) const;
 
   // --- PDU graph --------------------------------------------------------------
   std::optional<std::string> pdu_get(const std::string& event_id) const;

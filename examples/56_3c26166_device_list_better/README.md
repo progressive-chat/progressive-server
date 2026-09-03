@@ -6,11 +6,12 @@ Source: [`timokoesters/conduit@3c26166`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Improves the `/devices` endpoint to handle users with no devices (returns empty list) and adds better error handling. | **No-op for us** — our `/devices` endpoint (from step 79, `09e1713_device_last_seen`) already handles this case correctly. |
+| Simplifies `device_list_updates` in `/sync` by removing an unnecessary `UserId::try_from` conversion and storing the `user_target_encrypted` result in a variable. | **Translated** — added `Data::room_members(room_id)` to return the list of user_ids in a room, which is the underlying data source the Conduit commit iterates over. |
 
 ## Implementation details
 
-- **No-op for us** — our `/devices` endpoint (from step 79, `09e1713_device_last_seen`) already handles this case correctly.
+- **Added `Data::room_members(room_id)` in `data.hpp`/`data.cpp`** — returns a `std::vector<std::string>` of all user_ids that are members of the given room. This iterates over the existing `roomid_userids` sled tree, the same data structure that `room_users()` (count) and `rooms_joined()` (reverse lookup) use.
+- The Conduit commit's sync.rs change simplifies iteration over `db.rooms.room_members(&room_id)`. Our `/sync` route will use this new method when device list tracking is added in a later step.
 - No external Rust dependencies carried over (Cargo.toml changes are skipped)
 
 ## Smoke test

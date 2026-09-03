@@ -1267,6 +1267,60 @@ int main(int argc, char** argv) {
             ruma::respond(res, nlohmann::json::parse(*pdu_text));
           });
 
+  // NEW in 72eb197: Relations endpoints (MSC3440) — GET /rooms/<id>/relations/<eventId>[/<relType>[/<eventType>]]
+  // Three endpoints:
+  // 1. GET /rooms/{roomId}/relations/{eventId} - all relations for an event
+  // 2. GET /rooms/{roomId}/relations/{eventId}/{relType} - relations filtered by rel_type
+  // 3. GET /rooms/{roomId}/relations/{eventId}/{relType}/{eventType} - relations filtered by rel_type and event_type
+  auto get_relations_route = [&ctx](const httplib::Request& req, httplib::Response& res) {
+    const auto token = extract_token(req);
+    std::optional<std::string> user;
+    if (!token || !(user = ctx.data->user_from_token(*token))) {
+      ruma::respond(res,
+                    nlohmann::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                   {"error", "Unrecognised access token"}},
+                    401);
+      return;
+    }
+    const std::string room_id = req.matches[1];
+    const std::string event_id = req.matches[2];
+    if (!ctx.data->is_joined(*user, room_id)) {
+      ruma::respond(
+          res,
+          nlohmann::json{
+              {"errcode", "M_FORBIDDEN"},
+              {"error", "You don't have permission to view this room."}},
+          403);
+      return;
+    }
+    std::optional<std::string> rel_type;
+    std::optional<std::string> event_type;
+    if (req.matches.size() > 3 && !req.matches[3].str().empty()) {
+      rel_type = req.matches[3].str();
+    }
+    if (req.matches.size() > 4 && !req.matches[4].str().empty()) {
+      event_type = req.matches[4].str();
+    }
+    auto relations = ctx.data->get_relations(event_id, rel_type, event_type);
+    nlohmann::json chunk = nlohmann::json::array();
+    for (const auto& rel_event_id : relations) {
+      if (auto pdu = ctx.data->pdu_get(rel_event_id)) {
+        chunk.push_back(nlohmann::json::parse(*pdu));
+      }
+    }
+    ruma::respond(res, nlohmann::json{
+        {"chunk", std::move(chunk)},
+        {"next_batch", nlohmann::json(nullptr)},
+        {"prev_batch", nlohmann::json(nullptr)}
+    });
+  };
+  // Most specific first: /relations/{eventId}/{relType}/{eventType}
+  svr.Get(R"(/_matrix/client/r0/rooms/(.+)/relations/(.+)/([^/]+)/([^/]+))", get_relations_route);
+  // Then: /relations/{eventId}/{relType}
+  svr.Get(R"(/_matrix/client/r0/rooms/(.+)/relations/(.+)/([^/]+))", get_relations_route);
+  // Finally: /relations/{eventId}
+  svr.Get(R"(/_matrix/client/r0/rooms/(.+)/relations/(.+))", get_relations_route);
+
   // Better public room directory (abcce95d).
   svr.Post("/_matrix/client/r0/publicRooms", [&ctx](const httplib::Request& req,
                                                     httplib::Response& res) {

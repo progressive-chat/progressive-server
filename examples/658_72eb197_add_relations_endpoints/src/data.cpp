@@ -664,6 +664,17 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
                       event["content"].value("membership", ""));
   }
 
+  // NEW in 72eb197: Extract and store relations (m.relates_to)
+  if (event.contains("content") && event["content"].contains("m.relates_to")) {
+    auto relates_to = event["content"]["m.relates_to"];
+    std::string rel_type = relates_to.value("rel_type", "");
+    std::string event_type = relates_to.value("event_type", "");
+    std::string related_event_id = relates_to.value("event_id", "");
+    if (!rel_type.empty() && !event_type.empty() && !related_event_id.empty()) {
+      add_relation(event_id, rel_type, event_type, related_event_id);
+    }
+  }
+
   return true;
 }
 
@@ -854,6 +865,36 @@ std::vector<std::string> Data::pdus_since(const std::string& room_id,
   return pdus;
 }
 
+/// NEW in 72eb197: Add a relation from one event to another (e.g., edits, threads, reactions)
+// Key format: 'r' + event_id + 0xff + rel_type + 0xff + event_type -> related_event_id
+void Data::add_relation(const std::string& event_id,
+                        const std::string& rel_type,
+                        const std::string& event_type,
+                        const std::string& related_event_id) {
+  std::string key = "r" + event_id + static_cast<char>(0xff) + rel_type + static_cast<char>(0xff) + event_type;
+  db_.eventid_relations.add(key, related_event_id);
+}
+
+/// NEW in 72eb197: Get relations for an event, optionally filtered by rel_type and event_type
+std::vector<std::string> Data::get_relations(const std::string& event_id,
+                                             const std::optional<std::string>& rel_type,
+                                             const std::optional<std::string>& event_type) const {
+  std::vector<std::string> relations;
+  std::string prefix = "r" + event_id;
+  
+  if (rel_type.has_value()) {
+    prefix += static_cast<char>(0xff) + *rel_type;
+    if (event_type.has_value()) {
+      prefix += static_cast<char>(0xff) + *event_type;
+    }
+  }
+  
+  for (const auto& [key, value] : db_.eventid_relations.get_iter(prefix)) {
+    relations.push_back(value);
+  }
+  return relations;
+}
+
 // --- NEW in abcce95d: invites & state -------------------------------------------
 
 std::vector<std::string> Data::room_state(const std::string& room_id) const {
@@ -942,6 +983,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

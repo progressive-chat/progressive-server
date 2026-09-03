@@ -67,6 +67,9 @@ class Database {
   sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
   sled::Tree roomserverids;        // NEW in f7816b11d: room+0xff+server -> present
   Media media;                     // NEW in 821c608c: media repository
+
+  // NEW in 72eb197: relations (MSC3440) - event_id + rel_type + event_type -> related event_ids
+  MultiValue eventid_relations;  // 'r' + event_id + 0xff + rel_type + 0xff + event_type -> related_event_id
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
   private:
@@ -81,7 +84,9 @@ class Database {
             sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
             sled::Tree rs2,
             // NEW in c4f5a0a6: state resolution trees
-            sled::Tree sp, sled::Tree ps, sled::Tree rsh);
+            sled::Tree sp, sled::Tree ps, sled::Tree rsh,
+            // NEW in 72eb197: relations (MSC3440)
+            MultiValue er);
 };
 
 }  // namespace database

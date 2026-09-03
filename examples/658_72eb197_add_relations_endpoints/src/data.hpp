@@ -197,6 +197,17 @@ class Data {
   std::vector<std::string> pdus_since(const std::string& room_id,
                                       uint64_t since) const;
 
+  // --- NEW in 72eb197: relations (MSC3440) --------------------------------------
+  /// Add a relation from one event to another (e.g., edits, threads, reactions)
+  void add_relation(const std::string& event_id,
+                    const std::string& rel_type,
+                    const std::string& event_type,
+                    const std::string& related_event_id);
+  /// Get relations for an event, optionally filtered by rel_type and event_type
+  std::vector<std::string> get_relations(const std::string& event_id,
+                                         const std::optional<std::string>& rel_type = std::nullopt,
+                                         const std::optional<std::string>& event_type = std::nullopt) const;
+
   // --- displayname (folded prerequisite + fa9e127a-era semantics) -------------
   std::optional<std::string> displayname_get(const std::string& user_id) const;
   /// Set a new displayname. NEW in 4cc0a070: required (not optional) and

@@ -1149,6 +1149,60 @@ bool Data::admin_process_message(const std::string& room_id,
     // Extract the command (everything after "@conduit:server_name: ")
     std::string command = body.substr(prefix.length());
     
+    // NEW in ada07de2: ResetPassword admin command
+    // Format: "resetpassword <username>"
+    if (command.rfind("resetpassword ", 0) == 0) {
+      std::string username = command.substr(strlen("resetpassword "));
+      
+      // Convert to lowercase (case-insensitive login)
+      std::transform(username.begin(), username.end(), username.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      
+      // Ensure username has proper format
+      if (username.find(':') == std::string::npos) {
+        username = "@" + username + ":" + hostname();
+      }
+      
+      // Validate user_id format (similar to full_user_id_valid in handlers.cpp)
+      std::string user_id;
+      if (username.size() < 3 || username[0] != '@') {
+        std::clog << "[admin] Invalid username: " << username << "\n";
+        return true;
+      }
+      size_t colon = username.find(':');
+      if (colon == std::string::npos || colon == 1 || colon == username.size() - 1) {
+        std::clog << "[admin] Invalid username: " << username << "\n";
+        return true;
+      }
+      user_id = username;
+      
+      // Check if user exists and is not deactivated
+      if (!this->user_exists(user_id) || this->is_deactivated(user_id)) {
+        std::clog << "[admin] User does not exist or is deactivated: " << user_id << "\n";
+        return true;
+      }
+      
+      // Prevent resetting conduit user
+      std::string conduit_user = "@conduit:" + hostname();
+      if (user_id == conduit_user) {
+        std::clog << "[admin] Cannot reset password for conduit user\n";
+        return true;
+      }
+      
+      // Generate random password (20 chars like Conduit)
+      std::string new_password = utils::random_string(20);
+      
+      // Hash and store the new password using set_password
+      if (this->set_password(user_id, new_password)) {
+        std::clog << "[admin] Successfully reset password for user " << user_id
+                  << ": " << new_password << "\n";
+      } else {
+        std::clog << "[admin] Failed to hash new password for user " << user_id << "\n";
+      }
+      
+      return true;
+    }
+    
     // Process the command
     // This is a simplified implementation - full implementation would
     // parse and execute various admin commands

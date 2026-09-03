@@ -1635,7 +1635,7 @@ int main(int argc, char** argv) {
           });
 
   // NEW in b8193984: POST /account/deactivate — UIAA, leave/reject rooms,
-           [&ctx](const httplib::Request& req, httplib::Response& res) {
+  svr.Post("/_matrix/client/r0/account/deactivate", [&ctx](const httplib::Request& req, httplib::Response& res) {
     const auto token = extract_token(req);
     std::optional<std::string> user;
     if (!token || !(user = ctx.data->user_from_token(*token))) {

@@ -51,7 +51,7 @@ public:
 
 private:
     class Data& data_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::map<std::string, AppserviceRegistration> appservices_;
 };
 

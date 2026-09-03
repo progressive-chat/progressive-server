@@ -906,6 +906,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {
@@ -1110,3 +1111,54 @@ uint64_t Data::pdu_count(const std::string& pdu_id) const {
   // In a real implementation, we'd track the count in a separate tree
   return 0;
 }
+
+// NEW in 31918bb: admin_process_message — process admin room commands
+// Fix: don't process commands from the server's own messages to avoid loops.
+bool Data::admin_process_message(const std::string& room_id,
+                                 const std::string& sender,
+                                 const std::string& body) {
+  using json = nlohmann::json;
+  
+  // Get the server user (@conduit:server_name)
+  std::string server_user = "@conduit:" + hostname();
+  
+  // Get the admin room id for this server
+  std::string admin_room_alias = "#admins:" + hostname();
+  std::optional<std::string> admin_room_opt = id_from_alias(admin_room_alias);
+  if (!admin_room_opt) {
+    return false;  // No admin room configured
+  }
+  std::string admin_room = *admin_room_opt;
+  
+  // Check if this message is in the admin room
+  if (room_id != admin_room) {
+    return false;
+  }
+  
+  // Check if message is addressed to the server user
+  std::string prefix = server_user + ": ";
+  bool to_conduit = body.rfind(prefix, 0) == 0;  // starts with prefix
+  
+  // Check if message is from the server user
+  bool from_conduit = (sender == server_user);
+  
+  // NEW in 31918bb: Only process if message is TO conduit, NOT FROM conduit,
+  // and in the admin room. This avoids infinite loops from the server's
+  // own messages.
+  if (to_conduit && !from_conduit) {
+    // Extract the command (everything after "@conduit:server_name: ")
+    std::string command = body.substr(prefix.length());
+    
+    // Process the command
+    // This is a simplified implementation - full implementation would
+    // parse and execute various admin commands
+    std::clog << "[admin] Processing command from " << sender << ": " << command << "\n";
+    
+    // TODO: Implement actual admin command processing
+    // For now, just log and return true
+    return true;
+  }
+  
+  return false;
+}
+

@@ -4,6 +4,9 @@ project(conduit_30_1f292c09_federation_send LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Disable zstd for httplib
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "Uses ZSTD (if available) to enable zstd support." FORCE)
+
 include(FetchContent)
 
 FetchContent_Declare(nlohmann_json
@@ -80,6 +83,7 @@ add_library(conduit_core STATIC
   src/database.cpp
   src/crypto.cpp
   src/media.cpp
+  src/appservice_server.cpp
 )
 target_compile_definitions(conduit_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(conduit_core PUBLIC

@@ -27,22 +27,6 @@ std::string generate_token() {
     return token;
 }
 
-// Generate a random token
-static std::string generate_token() {
-    static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-    std::string token;
-    token.reserve(32);
-    thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<size_t> dist(0, sizeof(alphanum) - 2);
-    for (size_t i = 0; i < 32; ++i) {
-        token += alphanum[dist(rng)];
-    }
-    return token;
-}
-
 nlohmann::json AppserviceManager::register_appservice(
     const nlohmann::json& request) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -117,10 +101,7 @@ nlohmann::json AppserviceManager::handle_transaction(
         }
     }
 
-    nlohmann::json response;
-    response["pdus"] = nlohmann::json::object();
     return response;
 }
 
 }  // namespace appservice
-EOF

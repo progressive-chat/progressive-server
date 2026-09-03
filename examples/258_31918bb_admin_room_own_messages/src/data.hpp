@@ -224,6 +224,14 @@ class Data {
                    const std::string& user_id);
   std::vector<std::string> rooms_invited(const std::string& user_id) const;
 
+  // --- Admin room message processing (NEW in 31918bb) -------------------------
+  /// Process an admin room message. Returns true if the message was a command
+  /// addressed to the server user and was processed.
+  /// Skips messages from the server user itself to avoid infinite loops.
+  bool admin_process_message(const std::string& room_id,
+                             const std::string& sender,
+                             const std::string& body);
+
  private:
   explicit Data(const std::filesystem::path& dir, uint64_t cache_capacity);
 
@@ -232,3 +240,4 @@ class Data {
   sled::Db db_storage_;
   database::Database db_;
 };
+

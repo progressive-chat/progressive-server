@@ -136,8 +136,9 @@ class Data {
   }
 
   /// NEW in 7031240a: all state events of one type in a room.
-  std::vector<std::string> room_state_type(const std::string& room_id,
-                                           const std::string& type) const;
+// REMOVED in 6606e41: room_state_type was removed in favor of filtering
+  // room_state() by type. The Conduit commit adds a statekey_short tree for
+  // efficiency; we filter in-memory for now.
 
   // --- NEW in 3aa0c8ed (+ 9c26e22a): aliases & visibility ----------------------
   void set_alias(const std::string& alias, const std::string& room_id);

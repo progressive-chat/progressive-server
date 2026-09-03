@@ -1324,9 +1324,11 @@ int main(int argc, char** argv) {
               return;
             }
             nlohmann::json chunk = nlohmann::json::array();
-            for (const auto& pdu_text :
-                 ctx.data->room_state_type(room_id, "m.room.member")) {
-              chunk.push_back(nlohmann::json::parse(pdu_text));
+            for (const auto& pdu_text : ctx.data->room_state(room_id)) {
+              auto pdu = nlohmann::json::parse(pdu_text);
+              if (pdu.value("type", "") == "m.room.member") {
+                chunk.push_back(std::move(pdu));
+              }
             }
             ruma::respond(res, nlohmann::json{{"chunk", std::move(chunk)}});
           });
@@ -1347,10 +1349,12 @@ int main(int argc, char** argv) {
     const std::string state_key = req.matches.size() > 3 ? req.matches[3].str() : "";
     if (!ctx.data->is_joined(*user, room_id)) {
       // NEW in 243126d: check if room is world_readable
+      // REMOVED in 6606e41: room_state_type removed; filter room_state instead
       bool is_world_readable = false;
-      for (const auto& pdu_text : ctx.data->room_state_type(room_id, "m.room.history_visibility")) {
+      for (const auto& pdu_text : ctx.data->room_state(room_id)) {
         auto pdu = nlohmann::json::parse(pdu_text);
-        if (pdu.value("content", nlohmann::json::object()).value("history_visibility", "") == "world_readable") {
+        if (pdu.value("type", "") == "m.room.history_visibility" &&
+            pdu.value("content", nlohmann::json::object()).value("history_visibility", "") == "world_readable") {
           is_world_readable = true;
           break;
         }
@@ -1361,9 +1365,10 @@ int main(int argc, char** argv) {
         return;
       }
     }
-    for (const auto& pdu_text : ctx.data->room_state_type(room_id, type)) {
+    // REMOVED in 6606e41: room_state_type removed; filter room_state by type
+    for (const auto& pdu_text : ctx.data->room_state(room_id)) {
       auto pdu = nlohmann::json::parse(pdu_text);
-      if (pdu.value("state_key", "") == state_key) {
+      if (pdu.value("type", "") == type && pdu.value("state_key", "") == state_key) {
         ruma::respond(res, pdu["content"]);
         return;
       }

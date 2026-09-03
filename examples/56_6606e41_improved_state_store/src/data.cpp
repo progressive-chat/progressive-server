@@ -72,21 +72,9 @@ const std::string& Data::hostname() const { return hostname_; }
 
 const std::string& Data::keypair() const { return keypair_; }
 
-// NEW in 7031240a: state events of one type (prefix scan over
-// 'd'+room+0xff+type+0xff+state_key).
-std::vector<std::string> Data::room_state_type(const std::string& room_id,
-                                               const std::string& type) const {
-  std::vector<std::string> pdus;
-  std::string prefix;
-  prefix.push_back('d');
-  prefix += room_id;
-  prefix.push_back(static_cast<char>(0xff));
-  prefix += type;
-  for (const auto& [key, value] : db_.roomstateid_pdu.scan_prefix(prefix)) {
-    pdus.push_back(value);
-  }
-  return pdus;
-}
+// REMOVED in 6606e41: room_state_type was removed in favor of filtering
+// room_state() by type. The Conduit commit adds a statekey_short tree for
+// efficiency; we filter in-memory for now.
 
 std::vector<std::pair<std::string, std::string>> Data::debug_userid_roomids() const {
   return db_.userid_roomids.iter_all();

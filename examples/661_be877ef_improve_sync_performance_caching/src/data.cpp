@@ -656,6 +656,12 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
     state_key.push_back(static_cast<char>(0xff));
     state_key += event.value("state_key", "");
     db_.roomstateid_pdu.insert(state_key, pdu_json);
+
+    // NEW in be877ef: Invalidate state cache for this room
+    {
+      std::lock_guard<std::mutex> lock(db_.state_cache_mutex);
+      db_.state_snapshot_cache.erase(room_id);
+    }
   }
 
   // b6c0e9bf: membership tree updates happen here, post-authorization.
@@ -887,6 +893,28 @@ std::vector<nlohmann::json> Data::federation_full_state(const std::string& room_
   return out;
 }
 
+/// NEW in be877ef: get cached room state (avoids recomputing on /sync)
+// Returns the cached state if available, otherwise computes and caches it.
+std::vector<nlohmann::json> Data::get_cached_room_state(const std::string& room_id) const {
+  // Try to get from cache
+  {
+    std::lock_guard<std::mutex> lock(db_.state_cache_mutex);
+    auto it = db_.state_snapshot_cache.find(room_id);
+    if (it != db_.state_snapshot_cache.end()) {
+      // Return cached state
+      return it->second.second;
+    }
+  }
+  // Not in cache: compute using federation_full_state logic
+  std::vector<nlohmann::json> state = federation_full_state(room_id);
+  // Store in cache (use empty string as state_hash placeholder)
+  {
+    std::lock_guard<std::mutex> lock(db_.state_cache_mutex);
+    db_.state_snapshot_cache[room_id] = {"", std::move(state)};
+  }
+  return db_.state_snapshot_cache[room_id].second;
+}
+
 std::vector<nlohmann::json> Data::federation_auth_chain(
     const std::string& room_id, const std::vector<std::string>& event_ids) const {
   std::vector<nlohmann::json> out;
@@ -942,6 +970,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

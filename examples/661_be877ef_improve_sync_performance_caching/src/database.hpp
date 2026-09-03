@@ -69,6 +69,11 @@ class Database {
   Media media;                     // NEW in 821c608c: media repository
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
+  // NEW in be877ef: state snapshot cache to avoid recomputing room state on /sync
+  // Maps room_id -> (state_hash, state_events_json)
+  mutable std::mutex state_cache_mutex;
+  mutable std::unordered_map<std::string, std::pair<std::string, std::vector<nlohmann::json>>> state_snapshot_cache;
+
   private:
   Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
             sled::Tree pp, MultiValue rl, sled::Tree ep,

@@ -107,6 +107,8 @@ class Data {
   // --- NEW in 12a8c9ba: federation (server-side PDU serving) -----------------
   /// Current full state of a room as a list of PDU JSON objects.
   std::vector<nlohmann::json> federation_full_state(const std::string& room_id) const;
+  /// NEW in be877ef: get cached room state (avoids recomputing on /sync)
+  std::vector<nlohmann::json> get_cached_room_state(const std::string& room_id) const;
   /// Transitive auth-chain PDUs for the given (seed) event ids.
   std::vector<nlohmann::json> federation_auth_chain(
       const std::string& room_id, const std::vector<std::string>& event_ids) const;

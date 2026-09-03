@@ -1150,8 +1150,12 @@ bool Data::admin_process_message(const std::string& room_id,
   }
   
   // Check if message is addressed to the server user
-  std::string prefix = server_user + ": ";
-  bool to_conduit = body.rfind(prefix, 0) == 0;  // starts with prefix
+  // NEW in f5e3b0e: also accept commands without colon (many clients omit it)
+  std::string prefix_with_colon = server_user + ": ";
+  std::string prefix_without_colon = server_user + " ";
+  bool to_conduit = body.rfind(prefix_with_colon, 0) == 0
+                 || body.rfind(prefix_without_colon, 0) == 0;
+  std::string prefix = body.rfind(prefix_with_colon, 0) == 0 ? prefix_with_colon : prefix_without_colon;
   
   // Check if message is from the server user
   bool from_conduit = (sender == server_user);

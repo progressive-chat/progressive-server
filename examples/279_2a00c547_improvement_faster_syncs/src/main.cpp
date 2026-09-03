@@ -621,12 +621,35 @@ ruma::MatrixResult<ruma::SyncResponse> sync_route(Context* ctx,
     ruma::SyncResponse joined;
     joined.joined_room_id = room_id;
     const uint64_t last = ctx->data->last_pdu_index(room_id);
-    joined.limited = is_initial_sync && last > 0;
-    // b4d65ab6: incremental syncs return only PDUs newer than `since`;
-    // initial syncs return the full timeline.
-    joined.timeline_events = is_initial_sync
-                                 ? ctx->data->pdus_since(room_id, 0)
-                                 : ctx->data->pdus_since(room_id, since);
+
+    // NEW in 2a00c547: faster /syncs - check cached last timeline count
+    // If the last timeline count <= since, there are no new events to return
+    const uint64_t last_timeline = ctx->data->last_timeline_count(room_id);
+    bool limited = false;
+    std::vector<std::string> timeline_pdus;
+
+    if (is_initial_sync) {
+      // Initial sync: return full timeline (up to 10 events)
+      timeline_pdus = ctx->data->pdus_since(room_id, 0);
+      limited = last_timeline > 10;
+    } else if (last_timeline <= since) {
+      // No new events since `since` - skip PDU fetch entirely
+      timeline_pdus = {};
+      limited = false;
+    } else {
+      // Fetch new events since `since`, take last 10 for timeline
+      std::vector<std::string> all_new = ctx->data->pdus_since(room_id, since);
+      limited = all_new.size() > 10;
+      if (limited) {
+        // Take last 10 events (most recent)
+        timeline_pdus = std::vector<std::string>(all_new.end() - 10, all_new.end());
+      } else {
+        timeline_pdus = std::move(all_new);
+      }
+    }
+
+    joined.limited = limited;
+    joined.timeline_events = std::move(timeline_pdus);
     joined.prev_batch = std::to_string(last);
     resp.joined.emplace(room_id, std::move(joined));
   }

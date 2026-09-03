@@ -11,6 +11,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
+#include <mutex>
 
 namespace database {
 
@@ -62,9 +64,14 @@ class Database {
 sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
     sled::Tree roomserverids;       // NEW in 71500b1: room -> servers
     Media media;                     // NEW in 821c608c: media repository
-  Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
+Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
- private:
+  // NEW in 2a00c547: cache for last timeline count per room (optimization
+  // for /sync - avoids iterating PDUs when no new events)
+  mutable std::mutex last_timeline_count_mutex;
+  mutable std::unordered_map<std::string, uint64_t> last_timeline_count_cache;
+
+  private:
   Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
            sled::Tree pp, MultiValue rl, sled::Tree ep,
            sled::Tree rs, MultiValue ru, MultiValue ur,

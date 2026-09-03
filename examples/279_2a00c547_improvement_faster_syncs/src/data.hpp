@@ -96,6 +96,9 @@ class Data {
   bool room_pdu_first(const std::string& room_id, uint64_t pdu_index) const;
   /// NEW: last used stream index of a room (= current end position).
   uint64_t last_pdu_index(const std::string& room_id) const;
+  /// NEW in 2a00c547: cached last timeline count for a room (optimization
+  /// for /sync - avoids iterating PDUs when no new events since `since`).
+  uint64_t last_timeline_count(const std::string& room_id) const;
   /// NEW in 1f292c09: is this room known to us (has any PDU been stored)?
   bool room_exists(const std::string& room_id) const;
 

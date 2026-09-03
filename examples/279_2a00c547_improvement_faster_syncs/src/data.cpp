@@ -695,6 +695,12 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
   db_.pduid_pdus.insert(pdu_id, pdu_json);
   db_.eventid_pduid.insert(event_id, pdu_id);
 
+  // NEW in 2a00c547: update last timeline count cache
+  {
+    std::lock_guard<std::mutex> lock(db_.last_timeline_count_mutex);
+    db_.last_timeline_count_cache[room_id] = index;
+  }
+
   // NEW in abcce95d: state events also land in roomstateid_pdu under
   // 'd' + room + 0xff + type + 0xff + state_key.
   if (event.contains("state_key")) {
@@ -753,6 +759,42 @@ uint64_t Data::last_pdu_index(const std::string& room_id) const {
   if (const auto v = db_.pduid_pdus.get("n" + room_id))
     return utils::u64_from_bytes(*v);
   return 0;
+}
+
+/// NEW in 2a00c547: cached last timeline count for a room (optimization
+/// for /sync - avoids iterating PDUs when no new events since `since`).
+uint64_t Data::last_timeline_count(const std::string& room_id) const {
+  // Check cache first
+  {
+    std::lock_guard<std::mutex> lock(db_.last_timeline_count_mutex);
+    auto it = db_.last_timeline_count_cache.find(room_id);
+    if (it != db_.last_timeline_count_cache.end()) {
+      return it->second;
+    }
+  }
+  // Not in cache: find the last PDU index by iterating from the end
+  uint64_t last_index = 0;
+  std::string current = "d" + room_id + "#" + std::to_string(UINT64_MAX);
+  while (true) {
+    const auto prev = db_.pduid_pdus.get_lt(current);
+    if (!prev || prev->first.rfind("d" + room_id + "#", 0) != 0) break;
+    // Extract index from key "d<room_id>#<index>"
+    const std::string& key = prev->first;
+    size_t hash_pos = key.rfind('#');
+    if (hash_pos != std::string::npos && hash_pos + 1 < key.size()) {
+      try {
+        uint64_t idx = std::stoull(key.substr(hash_pos + 1));
+        if (idx > last_index) last_index = idx;
+      } catch (...) {}
+    }
+    current = prev->first;
+  }
+  // Store in cache
+  {
+    std::lock_guard<std::mutex> lock(db_.last_timeline_count_mutex);
+    db_.last_timeline_count_cache[room_id] = last_index;
+  }
+  return last_index;
 }
 
 bool Data::room_exists(const std::string& room_id) const {

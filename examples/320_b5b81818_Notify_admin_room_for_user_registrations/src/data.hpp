@@ -232,6 +232,10 @@ class Data {
                              const std::string& sender,
                              const std::string& body);
 
+  // NEW in b5b81818: send a notification to the admin room (logs for now;
+  // full admin room message sending would be implemented when admin room is created)
+  void admin_notify(const std::string& message) const;
+
  private:
   explicit Data(const std::filesystem::path& dir, uint64_t cache_capacity);
 

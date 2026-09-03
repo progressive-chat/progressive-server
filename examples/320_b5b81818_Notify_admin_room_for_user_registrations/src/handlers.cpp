@@ -108,6 +108,8 @@ ruma::MatrixResult<ruma::RegisterResponse> register_route(
 
   // NEW in 6e36081: log user registration
   std::clog << "[info] " << user_id << " registered on this server\n";
+  // NEW in b5b81818: notify admin room
+  ctx->data->admin_notify("New user " + user_id + " registered on this server.");
 
   return ruma::MatrixResult<ruma::RegisterResponse>::ok(ruma::RegisterResponse{
       .access_token = token,

@@ -1162,3 +1162,9 @@ bool Data::admin_process_message(const std::string& room_id,
   return false;
 }
 
+// NEW in b5b81818: send a notification to the admin room (logs for now;
+// full admin room message sending would be implemented when admin room is created)
+void Data::admin_notify(const std::string& message) const {
+  std::clog << "[admin] " << message << "\n";
+}
+

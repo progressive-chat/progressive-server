@@ -808,6 +808,9 @@ int main(int argc, char** argv) {
       ctx.data->remove_device(*user, device);
     }
 
+    // NEW in b5b81818: notify admin room
+    ctx.data->admin_notify("User " + *user + " changed their password.");
+
     ruma::respond(res, json::object());
   });
 
@@ -1695,6 +1698,8 @@ int main(int argc, char** argv) {
 
     // NEW in 6e36081: log account deactivation
     std::clog << "[info] " << *user << " deactivated their account\n";
+    // NEW in b5b81818: notify admin room
+    ctx.data->admin_notify("User " + *user + " deactivated their account.");
 
     ruma::respond(res, json{{"id_server_unbind_result", "no-support"}});
   });

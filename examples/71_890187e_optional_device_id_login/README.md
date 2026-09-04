@@ -6,11 +6,13 @@ Source: [`timokoesters/conduit@890187e`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Handle optional device_id during login** | **Translated** — Optional device_id in login |
+| **Handle optional device_id during login** | **Already implemented** — Uses `value_or(utils::random_string(10))` |
 
 ## Implementation details
 
-1. **Optional device_id in login** — Handle missing device_id during login
+**Already implemented** — Our login handler in `handlers.cpp` already uses `body.device_id.value_or(utils::random_string(10))` to generate a random device ID when none is provided.
+
+**Status:** Already implemented
 
 ## Smoke test
 

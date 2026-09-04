@@ -6,13 +6,21 @@ Source: [`timokoesters/conduit@96dc6be`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Use auth_events for step 6** | **Translated** — auth_events in state res |
-| **WIP forward_extremity_ids fn** | **Translated** — Work in progress |
+| **Use auth_events for step 6** | **Requires state resolution infrastructure** — Not yet implemented |
+| **WIP forward_extremity_ids fn** | **Requires state resolution infrastructure** — Not yet implemented |
 
 ## Implementation details
 
-1. **Auth events in step 6** — Use auth_events for state resolution step 6
-2. **Forward extremity IDs** — WIP function for forward extremity IDs
+This Conduit commit adds significant state resolution infrastructure for federation:
+
+1. **Uses auth_events for step 6 of state resolution** — The incoming PDU's auth events are used to build the auth cache
+2. **Implements forward_extremity_ids function** — Finds fork states by gathering forward extremities
+3. **Adds fetch_check_auth_events function** — DFS-based auth event chain validation
+4. **Adds forward_extremity_ids function** — Finds fork states by gathering forward extremities and fetching missing state
+
+**Status:** Requires full state resolution infrastructure (state_res, auth event chain fetching, fork state resolution) which is not yet implemented in our C++ translation. The federation send handler in server_server.cpp only has basic send_request functionality.
+
+**Note:** This is a major federation state resolution feature that requires the state resolution infrastructure from steps 67 (outlier/signing key trees) and 57 (state resolution basics).
 
 ## Smoke test
 

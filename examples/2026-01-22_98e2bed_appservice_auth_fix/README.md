@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@98e2bed`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Appservice ping endpoint only accepts `AuthScheme::AppserviceToken` (matched via `appservice_id_from_token`). | Translated to C++ with the same wire shape and behavior. |
+| Appservice ping endpoint only accepts `AuthScheme::AppserviceToken` (matched via `appservice_id_from_token`). | **Translated** — Implemented in POST /_matrix/client/v1/appservice/{appserviceId}/ping |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+The `/appservice/{appserviceId}/ping` endpoint in main.cpp:
+1. Extracts token via `extract_token(req)` 
+2. Validates token is an appservice token via `appservice_id_from_token`
+3. Returns 403 if not an appservice token
+4. Validates appservice ID matches request body
+5. Returns appropriate errors for mismatches
+
+**Status:** Real implementation
 
 ## Smoke test
 

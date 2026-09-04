@@ -6,12 +6,17 @@ Source: [`timokoesters/conduit@03dfa72`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Skips the create event lookup when converting stripped state to m.room.member events. No-op for us (no create event lookup in stripped path). | Translated to C++ with the same wire shape and behavior. |
+| Skips the create event lookup when converting stripped state to m.room.member events. Passes room version rules instead of room_id. | **Requires federation** — Our federation invite/knock doesn't have this optimization yet. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This fix changes `convert_stripped_state` to accept room version rules directly instead of looking them up from the room_id (which required a create event lookup):
+
+1. **Membership routes** (knock, invite): Pass `rules` instead of `room_id`
+2. **Federation invite creation**: Pass `rules` instead of `room_id`
+3. **convert_stripped_state utility**: Now takes `RoomVersionRules` directly, avoiding create event lookup
+
+**Status:** Requires federation implementation (step 29+). Our federation doesn't have this optimization yet.
 
 ## Smoke test
 

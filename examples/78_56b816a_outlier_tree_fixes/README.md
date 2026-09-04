@@ -6,14 +6,23 @@ Source: [`timokoesters/conduit@56b816a`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Fix and integrate outlier tree** | **Translated** — Outlier tree fixes |
-| **Build forks after adding event to DB** | **Translated** — Forks after event add |
+| **Fix and integrate outlier tree** | **Partial** — Outlier tree structure updated |
+| **Build forks after adding event to DB** | **Partial** — Fork building exists but not fully integrated |
 
 ## Implementation details
 
-1. **Outlier tree fixes** — Fix and integrate the outlier events tree
-2. **Forks after event** — Build forks after adding event to DB
-3. **Major server_server refactor** — Significant refactor
+This commit significantly changes the outlier tree structure:
+
+1. **Renamed `eventid_outlierpdu` to `pduid_outlierpdu`** — Now maps pdu_id to outlier PDU
+2. **Added `eventid_pduid` tree** — Maps event_id to pdu_id for outlier lookup
+3. **Outlier lookup now uses two-step lookup** — event_id -> pdu_id -> outlier PDU
+4. **`append_pdu_outlier` now takes pdu_id** instead of event_id
+5. **Outlier lookup uses two-step lookup** — event_id -> pdu_id -> outlier PDU
+6. **`append_pdu_outlier` now stores event_id -> pdu_id mapping** in `eventid_pduid`
+
+**In our C++ implementation:** Our database has `eventid_outlierpdu` but we don't have the `eventid_pduid` mapping or the `pduid_outlierpdu` rename. Our outlier handling is simpler.
+
+**Status:** Partially implemented — our outlier tree is simpler
 
 ## Smoke test
 

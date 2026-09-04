@@ -1317,6 +1317,121 @@ int main(int argc, char** argv) {
     ruma::respond(res, sync_route(&ctx, *wrapper.user_id, is_initial, since));
   });
 
+  // NEW in e4f7699: Sliding sync (MSC3575) — POST /_matrix/client/v4/sync
+  // Supports list-based syncing with configurable ranges and room details
+  svr.Post("/_matrix/client/v4/sync",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+    const auto token = extract_token(req);
+    std::optional<std::string> user;
+    if (!token || !(user = ctx.data->user_from_token(*token))) {
+      ruma::respond(res,
+                    nlohmann::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                   {"error", "Unrecognised access token"}},
+                    401);
+      return;
+    }
+    nlohmann::json body;
+    try {
+      body = json::parse(req.body);
+    } catch (...) {
+      body = json::object();
+    }
+
+    // Parse pos (since)
+    uint64_t since = 0;
+    if (body.contains("pos") && body["pos"].is_string()) {
+      try { since = std::stoull(body["pos"].get<std::string>()); } catch (...) {}
+    }
+
+    // Get all joined rooms
+    auto all_joined = ctx.data->rooms_joined(*user);
+
+    // Parse lists from request
+    nlohmann::json lists = nlohmann::json::object();
+    nlohmann::json rooms = nlohmann::json::object();
+
+    if (body.contains("lists") && body["lists"].is_object()) {
+      for (auto& [list_id, list] : body["lists"].items()) {
+        auto ranges = list.value("ranges", nlohmann::json::array());
+        auto room_details = list.value("room_details", nlohmann::json::object());
+        auto required_state = room_details.value("required_state", nlohmann::json::array());
+        uint64_t timeline_limit = room_details.value("timeline_limit", 10);
+
+        // Convert required_state to vector of pairs
+        std::vector<std::pair<std::string, std::string>> state_keys;
+        for (const auto& rs : required_state) {
+          if (rs.is_array() && rs.size() == 2) {
+            state_keys.emplace_back(rs[0].get<std::string>(), rs[1].get<std::string>());
+          }
+        }
+
+        nlohmann::json ops = nlohmann::json::array();
+        std::vector<std::string> todo_rooms;
+
+        for (const auto& range : ranges) {
+          size_t start = range[0].get<size_t>();
+          size_t end = range[1].get<size_t>();
+          if (start > all_joined.size()) start = all_joined.size();
+          if (end >= all_joined.size()) end = all_joined.size() - 1;
+          if (start > end) continue;
+
+          nlohmann::json room_ids = nlohmann::json::array();
+          for (size_t i = start; i <= end && i < all_joined.size(); ++i) {
+            room_ids.push_back(all_joined[i]);
+            todo_rooms.push_back(all_joined[i]);
+          }
+
+          ops.push_back(nlohmann::json{
+              {"op", "sync"},
+              {"range", {static_cast<uint64_t>(start), static_cast<uint64_t>(end)}},
+              {"room_ids", room_ids}
+          });
+        }
+
+        // Process rooms in this list
+        for (const auto& room_id : todo_rooms) {
+          auto [timeline_pdus, limited] = ctx.data->get_timeline_pdus(room_id, since, timeline_limit);
+          auto required_state_pdus = ctx.data->get_required_state(room_id, state_keys);
+
+          nlohmann::json timeline = nlohmann::json::array();
+          for (const auto& pdu_text : timeline_pdus) {
+            timeline.push_back(nlohmann::json::parse(pdu_text));
+          }
+          nlohmann::json state = nlohmann::json::array();
+          for (const auto& pdu_text : required_state_pdus) {
+            state.push_back(nlohmann::json::parse(pdu_text));
+          }
+
+          rooms[room_id] = nlohmann::json{
+              {"timeline", timeline},
+              {"state", state},
+              {"name", ctx.data->get_room_name(room_id)},
+              {"limited", limited}
+          };
+        }
+
+        lists[list_id] = nlohmann::json{
+            {"ops", ops},
+            {"count", static_cast<uint64_t>(all_joined.size())}
+        };
+      }
+    }
+
+    // Generate next_batch (current stream position)
+    std::string next_batch = std::to_string(ctx.data->last_pdu_index(""));
+
+    ruma::respond(res, nlohmann::json{
+        {"pos", std::to_string(since)},
+        {"next_batch", next_batch},
+        {"lists", lists},
+        {"rooms", rooms},
+        {"extensions", nlohmann::json::object()},
+        {"device_lists", nlohmann::json::object()},
+        {"account_data", nlohmann::json::object()},
+        {"device_one_time_keys_count", nlohmann::json::object()}
+    });
+  });
+
   // --- NEW in 1af6dd98: server-side federation identity --------------------
 
   // GET /.well-known/matrix/server — delegation hint. Upstream hardcoded its

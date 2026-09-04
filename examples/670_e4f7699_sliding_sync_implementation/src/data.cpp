@@ -854,6 +854,40 @@ std::vector<std::string> Data::pdus_since(const std::string& room_id,
   return pdus;
 }
 
+/// NEW in e4f7699: Get timeline PDUs for a room since a given count, with limit
+std::pair<std::vector<std::string>, bool> Data::get_timeline_pdus(
+    const std::string& room_id, uint64_t since, uint64_t limit) const {
+  std::vector<std::string> all_pdus = pdus_since(room_id, since);
+  bool limited = all_pdus.size() > limit;
+  if (limited) {
+    // Take last `limit` events (most recent)
+    std::vector<std::string> timeline(all_pdus.end() - limit, all_pdus.end());
+    return {std::move(timeline), true};
+  }
+  return {std::move(all_pdus), false};
+}
+
+/// NEW in e4f7699: Get required state events for a room
+std::vector<std::string> Data::get_required_state(
+    const std::string& room_id,
+    const std::vector<std::pair<std::string, std::string>>& state_keys) const {
+  std::vector<std::string> state;
+  for (const auto& [type, key] : state_keys) {
+    if (auto pdu = room_state_get(room_id, type, key)) {
+      state.push_back(pdu->dump());
+    }
+  }
+  return state;
+}
+
+/// NEW in e4f7699: Get room name for sliding sync
+std::string Data::get_room_name(const std::string& room_id) const {
+  if (auto pdu = room_state_get(room_id, "m.room.name", "")) {
+    return pdu->value("content", nlohmann::json::object()).value("name", "");
+  }
+  return "";
+}
+
 // --- NEW in abcce95d: invites & state -------------------------------------------
 
 std::vector<std::string> Data::room_state(const std::string& room_id) const {
@@ -942,6 +976,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

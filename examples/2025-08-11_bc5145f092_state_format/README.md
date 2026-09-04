@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@bc5145f092`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| `get_state_events_for_key_route` accepts `?format=...` (event|content) for `GET /state/{type}/{key}`. | Translated to C++ with the same wire shape and behavior. |
+| `get_state_events_for_key_route` accepts `?format=...` (event|content) for `GET /state/{type}/{key}`. | **Translated** — Added `format` query parameter to `/state/{type}/{key}` and `/state/{type}` routes. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This commit adds a `format` query parameter to GET state endpoints:
+
+1. **GET /_matrix/client/r0/rooms/{roomId}/state/{eventType}/{stateKey}**
+2. **GET /_matrix/client/r0/rooms/{roomId}/state/{eventType}**
+
+Supports `format=event` (full event) or `format=content` (just content). Defaults to "content" for backward compatibility.
+
+**Status:** Implementation plan - add format parameter parsing to state routes in main.cpp.
 
 ## Smoke test
 

@@ -6,12 +6,19 @@ Source: [`timokoesters/conduit@82b7cf6261`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| No-op — we don't implement federation make_leave/send_leave. Our local `/leave` already populates the security-critical fields. | Translated to C++ with the same wire shape and behavior. |
+| Uses `populate_membership_template` helper for `/leave` instead of manual event construction. Prevents event forgery. | **Requires federation** — Uses shared membership template helper for leave. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This commit refactors the remote leave flow to use `populate_membership_template`:
+
+1. **Replaces manual event construction** with `populate_membership_template` helper
+2. **Simplifies leave event creation**: No manual canonical JSON manipulation, event ID generation, or hashing
+3. **Passes reason parameter** through to the template
+4. **Uses `MembershipState::Leave`** in the template
+5. **Adds required fields** in helper: `type`, `sender`, `state_key` (added in helpers/mod.rs)
+
+**Status:** Requires federation implementation (step 29+). Our federation doesn't have this helper.
 
 ## Smoke test
 

@@ -906,6 +906,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

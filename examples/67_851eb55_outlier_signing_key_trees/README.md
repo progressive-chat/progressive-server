@@ -6,17 +6,15 @@ Source: [`timokoesters/conduit@851eb55`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Abstract event validation/fetching** | **Translated** — Event validation abstraction |
-| **Add outlier DB tree** | **Translated** — New outlier events tree |
-| **Add signing key DB tree** | **Translated** — New signing key tree |
-| **Major server_server refactor** | **Translated** — Cleaner server_server |
+| **Add outlier DB tree** | **Translated** — Added `eventid_outlierpdu` tree |
+| **Add signing key DB tree** | **Translated** — Added `servertimeout_signingkey` tree |
 
 ## Implementation details
 
-1. **Event validation abstraction** — New event validation layer
-2. **Outlier events tree** — New database tree for outlier events
-3. **Signing key tree** — New database tree for signing keys
-4. **Server server refactor** — Major refactor of server_server
+1. **Added `eventid_outlierpdu` tree** — Maps event_id to outlier PDU for events that haven't passed state resolution yet
+2. **Added `servertimeout_signingkey` tree** — Stores signing key for server timeout operations
+
+**Status:** Real implementation (database trees added). The event validation abstraction and server_server refactor are not yet implemented in C++.
 
 ## Smoke test
 

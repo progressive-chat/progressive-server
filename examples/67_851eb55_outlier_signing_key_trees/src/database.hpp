@@ -61,6 +61,9 @@ class Database {
   sled::Tree aliasid_alias;        // NEW in 3aa0c8ed: room+idx -> alias
 sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
     sled::Tree roomserverids;       // NEW in 71500b1: room -> servers
+    // NEW in 851eb55: outlier events and signing keys
+    sled::Tree eventid_outlierpdu;      // NEW in 851eb55: event_id -> outlier PDU
+    sled::Tree servertimeout_signingkey; // NEW in 851eb55: signing key for server timeout
     Media media;                     // NEW in 821c608c: media repository
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
@@ -74,7 +77,9 @@ sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
            sled::Tree rs2,
            sled::Tree ro,
            sled::Tree ti,
-           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl);
+           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
+           // NEW in 851eb55: outlier events and signing keys
+           sled::Tree eo, sled::Tree sk);
 };
 
 }  // namespace database

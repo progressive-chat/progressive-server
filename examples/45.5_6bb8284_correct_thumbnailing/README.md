@@ -1,8 +1,8 @@
-# Step 45 — "improvement: correct thumbnailing algorithm" (Conduit `6bb8284`)
+# Step 45.5 — "improvement: correct thumbnailing algorithm" (Conduit `6bb8284`)
 
 Source: [`timokoesters/conduit@6bb8284`](https://github.com/timokoesters/conduit/commit/6bb8284) (2020-10-19)
 
-## What changed vs step 44
+## What changed vs step 45
 
 | Rust change | C++ translation |
 |---|---|

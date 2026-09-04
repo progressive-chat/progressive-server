@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@1c6b2e0`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Updated MSC4311 support to include the create event in the `auth_chain` of all state events. | Translated to C++ with the same wire shape and behavior. |
+| Updated MSC4311 support to include the create event in the `auth_chain` of all state events. | **Requires federation** — Follows step 532b17a (MSC4311). Updates create event in auth chains. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This is an update to the MSC4311 implementation (create event in auth chains):
+
+1. **Membership routes**: Updated to include create event in auth chains
+2. **State cache**: Updated to handle create event in auth chains
+3. **Event handler**: Modified state resolution to include create event
+4. **Utils**: Updated `get_create_event` and related utilities
+
+**Status:** Follows step 532b17a (MSC4311). Requires federation implementation.
 
 ## Smoke test
 

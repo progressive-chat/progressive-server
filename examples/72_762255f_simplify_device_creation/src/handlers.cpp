@@ -181,9 +181,17 @@ ruma::MatrixResult<ruma::LoginResponse> login_route(Context* ctx,
 
   const std::string device_id =
       body.device_id.value_or(utils::random_string(10));
-  ctx->data->device_add(user_id, device_id);
+
+  // NEW in 762255f: Simplified device creation logic during login
+  // If device_id was provided and exists, just update its token.
+  // Otherwise create a new device.
+  if (body.device_id.has_value() && ctx->data->device_exists(user_id, device_id)) {
+    ctx->data->token_replace(user_id, device_id, new_token());
+  } else {
+    ctx->data->device_add(user_id, device_id);
+    ctx->data->token_replace(user_id, device_id, new_token());
+  }
   const std::string token = new_token();
-  ctx->data->token_replace(user_id, device_id, token);
 
   return ruma::MatrixResult<ruma::LoginResponse>::ok(ruma::LoginResponse{
       .user_id = user_id,

@@ -209,6 +209,15 @@ void Data::token_replace(const std::string& user_id, const std::string& device_i
   db_.token_userid.insert(token, user_id);
 }
 
+// NEW in 762255f: check if a device exists for a user
+bool Data::device_exists(const std::string& user_id,
+                         const std::string& device_id) const {
+  for (const auto& [k, v] : db_.userid_deviceids.get_iter(user_id)) {
+    if (v == device_id) return true;
+  }
+  return false;
+}
+
 // --- membership ----------------------------------------------------------------
 
 bool Data::room_join(const std::string& room_id, const std::string& user_id) {
@@ -906,6 +915,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

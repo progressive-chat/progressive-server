@@ -6,11 +6,17 @@ Source: [`timokoesters/conduit@762255f`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Simplify device creation logic** | **Translated** — Cleaner device creation |
+| **Simplify device creation logic** | **Translated** — Simplified device creation during login |
 
 ## Implementation details
 
-1. **Device creation logic** — Simplified device creation during login
+1. **Added `device_exists()` method** to `Data` class to check if a device exists for a user
+2. **Updated `login_route`** to use simplified logic:
+   - If `device_id` was provided and already exists for the user, just update its token
+   - Otherwise create a new device with `device_add()` and `token_replace()`
+3. **Simplified logic**: Removed the `create_new_device` flag and explicit iteration
+
+**Status:** Real implementation
 
 ## Smoke test
 

@@ -51,6 +51,8 @@ class Data {
   void device_add(const std::string& user_id, const std::string& device_id);
   void token_replace(const std::string& user_id, const std::string& device_id,
                      const std::string& token);
+  // NEW in 762255f: check if a device exists for a user
+  bool device_exists(const std::string& user_id, const std::string& device_id) const;
   /// NEW in b106d139: remove_device — deletes the (user, device) binding and
   /// its access token. Returns false when the token belongs to nobody.
   void remove_device(const std::string& user_id, const std::string& device_id);

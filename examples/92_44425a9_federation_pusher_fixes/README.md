@@ -6,15 +6,20 @@ Source: [`timokoesters/conduit@44425a9`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Multiple federation/pusher fixes** | **Translated** — Federation/pusher fixes |
-| **Major error.rs cleanup** | **Translated** — Removed unused error code |
-| **Major server_server refactor** | **Translated** — Cleaner server_server |
+| **Multiple federation/pusher fixes** | **No-op for us** — Cleaned up debug prints |
+| **Major error.rs cleanup** | **No-op for us** — No custom logger |
+| **Major server_server refactor** | **No-op for us** — No custom logger |
 
 ## Implementation details
 
-1. **Federation/pusher fixes** — Multiple federation and pusher fixes
-2. **Error cleanup** — Removed unused error code
-3. **Server server refactor** — Major refactor of server_server
+This Conduit commit removes debug macros (`dbg!()`, `dbg!()`, `println!()`) and removes a custom `ConduitLogger` implementation that sent admin messages via log crate.
+
+**In our C++ implementation:**
+- We don't use Rust's `dbg!()`/`println!()` debug macros
+- We don't have a custom `ConduitLogger` equivalent (we use `std::cerr` directly)
+- Log level changes (info→debug) in server_server.rs are not applicable since we use `std::cerr` for all logging
+
+**Status:** No-op for us (already clean)
 
 ## Smoke test
 

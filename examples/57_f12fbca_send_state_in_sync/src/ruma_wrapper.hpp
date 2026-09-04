@@ -118,6 +118,10 @@ struct SyncResponse {
   std::vector<std::string> timeline_events;
   std::string prev_batch;  // NEW in 23cb550d: pagination token for the timeline
   bool limited = false;    // NEW in b4d65ab6: true on a room's first sync
+  // NEW in f12fbca: state events in sync
+  struct State {
+    std::vector<nlohmann::json> events;
+  } state;
   std::map<std::string, SyncResponse> joined;
   std::map<std::string, SyncResponse> invited;
   std::vector<std::string> stripped_state;

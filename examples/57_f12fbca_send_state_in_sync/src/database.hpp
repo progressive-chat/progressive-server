@@ -45,6 +45,10 @@ class Database {
   MultiValue roomid_pduleaves;
   sled::Tree eventid_pduid;
   sled::Tree roomstateid_pdu;      // NEW: 'd'+room+0xff+type+0xff+state_key -> pdu
+  // NEW in f12fbca: state resolution sled trees
+  sled::Tree stateid_pduid;         // StateId = StateHash + (EventType, StateKey) -> pdu
+  sled::Tree pduid_statehash;      // PDU id -> StateHash
+  sled::Tree roomid_statehash;     // room_id -> latest StateHash
   sled::Tree userid_displayname;   // folded prerequisite (profile endpoints)
   MultiValue roomid_userids;       // NEW (folded prerequisite): room membership
   MultiValue userid_roomids;       // NEW
@@ -74,7 +78,9 @@ sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
            sled::Tree rs2,
            sled::Tree ro,
            sled::Tree ti,
-           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl);
+           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
+           // NEW in f12fbca: state resolution trees
+           sled::Tree sp, sled::Tree ps, sled::Tree rsh);
 };
 
 }  // namespace database

@@ -627,6 +627,29 @@ ruma::MatrixResult<ruma::SyncResponse> sync_route(Context* ctx,
     joined.timeline_events = is_initial_sync
                                  ? ctx->data->pdus_since(room_id, 0)
                                  : ctx->data->pdus_since(room_id, since);
+
+    // NEW in f12fbca: send state events in /sync
+    // Get state events that have changed since the last sync
+    if (is_initial_sync) {
+      // Initial sync: send all current state
+      for (const auto& pdu_text : ctx->data->room_state(room_id)) {
+        auto pdu = nlohmann::json::parse(pdu_text);
+        if (pdu.contains("state_key")) {
+          joined.state.events.push_back(std::move(pdu));
+        }
+      }
+    } else if (since > 0) {
+      // Incremental sync: get state changes since the last sync
+      // For simplicity, we'll send all current state for now
+      // A full implementation would track since_state hash
+      for (const auto& pdu_text : ctx->data->room_state(room_id)) {
+        auto pdu = nlohmann::json::parse(pdu_text);
+        if (pdu.contains("state_key")) {
+          joined.state.events.push_back(std::move(pdu));
+        }
+      }
+    }
+
     joined.prev_batch = std::to_string(last);
     resp.joined.emplace(room_id, std::move(joined));
   }

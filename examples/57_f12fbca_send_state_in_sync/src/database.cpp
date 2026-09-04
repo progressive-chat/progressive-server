@@ -52,7 +52,9 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
                     sled::Tree rs2,
                     sled::Tree ro,
                     sled::Tree ti,
-                    sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl)
+                    sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
+                    // NEW in f12fbca: state resolution trees
+                    sled::Tree sp, sled::Tree ps, sled::Tree rsh)
      : userid_password(std::move(up)),
       userid_deviceids(std::move(ud)),
       userdeviceid_token(std::move(ut)),
@@ -77,7 +79,11 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
       backupid_algorithm(std::move(ba)),
       backupid_etag(std::move(be)),
       backupkeyid_backup(std::move(bb)),
-      backup_latest(std::move(bl)) {}
+      backup_latest(std::move(bl)),
+      // NEW in f12fbca: state resolution trees
+      stateid_pduid(std::move(sp)),
+      pduid_statehash(std::move(ps)),
+      roomid_statehash(std::move(rsh)) {}
 
 Database Database::open(sled::Db* db) {
   return Database(db->open_tree("userid_password"),
@@ -104,7 +110,11 @@ Database Database::open(sled::Db* db) {
                   db->open_tree("backupid_algorithm"),
                   db->open_tree("backupid_etag"),
                   db->open_tree("backupkeyid_backup"),
-                  db->open_tree("backup_latest"));
+                  db->open_tree("backup_latest"),
+                  // NEW in f12fbca: state resolution trees
+                  db->open_tree("stateid_pduid"),
+                  db->open_tree("pduid_statehash"),
+                  db->open_tree("roomid_statehash"));
 }
 
 }  // namespace database

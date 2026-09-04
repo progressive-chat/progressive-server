@@ -196,6 +196,29 @@ class Data {
                                                const std::string& state_key) const;
   bool is_public(const std::string& room_id) const;
 
+  // --- NEW in f12fbca: state resolution for /sync state events ----------------
+  /// Generate a new StateHash for an incoming state PDU and store it.
+  std::string append_state_pdu(const std::string& room_id,
+                               const std::string& pdu_id,
+                               const std::string& state_key,
+                               const std::string& event_type);
+  /// Compute a new StateHash from the current room state.
+  std::string new_state_hash_id(const std::string& room_id);
+  /// Get the current state of a room as (state_key, pdu_id) pairs.
+  std::vector<std::pair<std::string, std::string>> current_state_pduids(
+      const std::string& room_id);
+  /// Get the StateHash for a specific PDU.
+  std::optional<std::string> pdu_statehash(const std::string& pdu_id) const;
+  /// Get the full state map for a given StateHash.
+  std::vector<std::pair<std::string, std::string>> get_statemap_by_hash(
+      const std::string& state_hash) const;
+  /// Get the previous StateHash in the chain.
+  std::optional<std::string> prev_state_hash(const std::string& current) const;
+  /// Get the previous content for a state event (for unsigned.prev_content).
+  std::optional<nlohmann::json> get_prev_content(const std::string& room_id,
+                                                 const std::string& type,
+                                                 const std::string& state_key) const;
+
   /// NEW in 821c608c: media repository access.
   void media_create(const std::string& mxc, const std::optional<std::string>& filename,
                     const std::string& content_type, const std::string& file);

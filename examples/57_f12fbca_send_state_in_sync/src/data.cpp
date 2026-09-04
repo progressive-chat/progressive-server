@@ -2,6 +2,7 @@
 
 #include "crypto.hpp"
 #include "utils.hpp"
+#include "state_res.hpp"
 
 #include <algorithm>
 #include <iostream>
@@ -655,14 +656,12 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
 
   // NEW in 4cc0a070: state events carry unsigned.prev_content with the old
   // content (upstream notes: TODO optimize — loads the whole room state).
+  // NEW in f12fbca: use state resolution to get previous content efficiently.
   if (event.contains("state_key")) {
-    for (const auto& state_text : room_state(room_id)) {
-      auto prev = nlohmann::json::parse(state_text, nullptr, false);
-      if (!prev.is_discarded() && prev.value("type", "") == event.value("type", "") &&
-          prev.value("state_key", "") == event.value("state_key", "")) {
-        event["unsigned"]["prev_content"] = prev.value("content", nlohmann::json::object());
-        break;
-      }
+    if (auto prev_content = get_prev_content(room_id,
+                                             event.value("type", ""),
+                                             event.value("state_key", ""))) {
+      event["unsigned"]["prev_content"] = std::move(*prev_content);
     }
   }
 
@@ -706,6 +705,10 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
     state_key.push_back(static_cast<char>(0xff));
     state_key += event.value("state_key", "");
     db_.roomstateid_pdu.insert(state_key, pdu_json);
+
+    // NEW in f12fbca: generate new StateHash and update state trees
+    append_state_pdu(room_id, pdu_id, event.value("state_key", ""),
+                     event.value("type", ""));
   }
 
   // b6c0e9bf: membership tree updates happen here, post-authorization.
@@ -816,6 +819,150 @@ std::vector<std::string> Data::room_state(const std::string& room_id) const {
   return state;
 }
 
+// --- NEW in f12fbca: state resolution for /sync state events ----------------
+std::string Data::append_state_pdu(const std::string& room_id,
+                                   const std::string& pdu_id,
+                                   const std::string& state_key,
+                                   const std::string& event_type) {
+  // Gather the current state PDU ids (all (type,key) -> pdu_id)
+  std::vector<std::string> pdu_ids;
+  for (const auto& state_text : room_state(room_id)) {
+    auto ev = nlohmann::json::parse(state_text, nullptr, false);
+    if (!ev.is_discarded() && ev.contains("event_id")) {
+      pdu_ids.push_back(ev["event_id"].get<std::string>());
+    }
+  }
+  // Compute the new StateHash from the sorted PDU ids
+  const std::string state_hash = new_state_hash_id(room_id);
+  // Store pdu_id -> state_hash
+  db_.pduid_statehash.insert(pdu_id, state_hash);
+  // Store room_id -> state_hash (so we know the latest)
+  db_.roomid_statehash.insert(room_id, state_hash);
+  // For each state event, also store stateid_pduid entry
+  for (const auto& pid : pdu_ids) {
+    std::string stateid;
+    stateid += state_hash;
+    stateid.push_back(static_cast<char>(0xff));
+    stateid += event_type;
+    stateid.push_back(static_cast<char>(0xff));
+    stateid += state_key;
+    db_.stateid_pduid.insert(stateid, pid);
+  }
+  return state_hash;
+}
+
+std::string Data::new_state_hash_id(const std::string& room_id) {
+  // Use current_state_pduids to get all state PDU ids efficiently
+  auto state_pairs = current_state_pduids(room_id);
+  std::vector<std::string> pdu_ids;
+  pdu_ids.reserve(state_pairs.size());
+  for (const auto& [state_key, pdu_id] : state_pairs) {
+    pdu_ids.push_back(pdu_id);
+  }
+  if (pdu_ids.empty()) {
+    // No state yet — hash the room_id itself
+    return state_res::new_state_hash({room_id});
+  }
+  return state_res::new_state_hash(pdu_ids);
+}
+
+std::vector<std::pair<std::string, std::string>> Data::current_state_pduids(
+    const std::string& room_id) {
+  std::vector<std::pair<std::string, std::string>> result;
+  std::string prefix;
+  prefix.push_back('d');
+  prefix += room_id;
+  prefix.push_back(static_cast<char>(0xff));
+  for (const auto& [key, value] : db_.roomstateid_pdu.scan_prefix(prefix)) {
+    // The full key is 'd' + room + 0xff + type + 0xff + state_key
+    // Strip the prefix to get type + 0xff + state_key
+    std::string rest = key.substr(prefix.size());
+    auto sep = rest.find(static_cast<char>(0xff));
+    if (sep != std::string::npos) {
+      std::string state_key = rest.substr(sep + 1);
+      auto ev = nlohmann::json::parse(value, nullptr, false);
+      if (!ev.is_discarded() && ev.contains("event_id")) {
+        result.push_back({state_key, ev["event_id"].get<std::string>()});
+      }
+    }
+  }
+  return result;
+}
+
+std::optional<std::string> Data::pdu_statehash(const std::string& pdu_id) const {
+  auto v = db_.pduid_statehash.get(pdu_id);
+  if (!v) return std::nullopt;
+  return *v;
+}
+
+std::vector<std::pair<std::string, std::string>> Data::get_statemap_by_hash(
+    const std::string& state_hash) const {
+  std::vector<std::pair<std::string, std::string>> result;
+  for (const auto& [key, value] : db_.stateid_pduid.scan_prefix(state_hash)) {
+    // Key format: state_hash + 0xff + event_type + 0xff + state_key
+    std::string rest = key.substr(state_hash.size() + 1);
+    auto sep1 = rest.find(static_cast<char>(0xff));
+    if (sep1 != std::string::npos) {
+      std::string event_type = rest.substr(0, sep1);
+      std::string state_key = rest.substr(sep1 + 1);
+      auto ev = nlohmann::json::parse(value, nullptr, false);
+      if (!ev.is_discarded() && ev.contains("event_id")) {
+        result.push_back({event_type + static_cast<char>(0xff) + state_key,
+                          ev["event_id"].get<std::string>()});
+      }
+    }
+  }
+  return result;
+}
+
+std::optional<std::string> Data::prev_state_hash(const std::string& current) const {
+  bool found = false;
+  for (const auto& [key, value] : db_.pduid_statehash.iter_all()) {
+    std::string prev = value;
+    if (current == prev) {
+      found = true;
+    } else if (found && current != prev) {
+      return prev;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<nlohmann::json> Data::get_prev_content(const std::string& room_id,
+                                                     const std::string& type,
+                                                     const std::string& state_key) const {
+  // First get the current state hash for the room
+  auto state_hash_opt = db_.roomid_statehash.get(room_id);
+  if (!state_hash_opt) return std::nullopt;
+  
+  // Build the state_id key: state_hash + 0xff + type + 0xff + state_key
+  std::string stateid = *state_hash_opt + static_cast<char>(0xff) + type + static_cast<char>(0xff) + state_key;
+  
+  // Look up the pdu_id from stateid_pduid
+  auto pdu_id_opt = db_.stateid_pduid.get(stateid);
+  if (!pdu_id_opt) return std::nullopt;
+  
+  // Get the previous state hash for this PDU
+  auto prev_hash = prev_state_hash(*pdu_id_opt);
+  if (!prev_hash) return std::nullopt;
+  
+  // Build the previous state_id key
+  std::string prev_stateid = *prev_hash + static_cast<char>(0xff) + type + static_cast<char>(0xff) + state_key;
+  
+  // Look up the previous pdu_id
+  auto prev_pdu_id_opt = db_.stateid_pduid.get(prev_stateid);
+  if (!prev_pdu_id_opt) return std::nullopt;
+  
+  // Get the PDU and extract its content
+  auto pdu_opt = db_.pduid_pdus.get(*prev_pdu_id_opt);
+  if (!pdu_opt) return std::nullopt;
+  
+  auto prev_pdu = nlohmann::json::parse(*pdu_opt, nullptr, false);
+  if (prev_pdu.is_discarded()) return std::nullopt;
+  
+  return prev_pdu.value("content", nlohmann::json::object());
+}
+
 // NEW in 12a8c9ba: federation helpers -----------------------------------------
 std::vector<nlohmann::json> Data::federation_full_state(const std::string& room_id) const {
   // Derive current state from the room's PDUs directly (latest event wins per
@@ -906,6 +1053,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

@@ -171,8 +171,10 @@ std::optional<nlohmann::json> send_request(
   auto res = client.Post(path, headers, request_map.dump(), "application/json");
   if (!res) {
     // error!("{}", e) upstream — logged and swallowed.
-    std::cerr << "[error] federation request to " << destination << " failed ("
-              << static_cast<int>(res.error()) << ")\n";
+    // NEW in fb9bd34: include the actual error message
+    std::string error_str = httplib::to_string(res.error());
+    std::cerr << "[error] federation request to " << destination << " failed: "
+              << error_str << " (" << static_cast<int>(res.error()) << ")\n";
     return std::nullopt;
   }
 

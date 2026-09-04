@@ -6,11 +6,13 @@ Source: [`timokoesters/conduit@fb9bd34`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Better warnings when server is unreachable** | **Translated** — Improved error messages |
+| **Better warnings when server is unreachable** | **Translated** — Error message now includes the actual error string from httplib |
 
 ## Implementation details
 
-1. **Better error messages** — Clearer warnings for unreachable servers
+1. **Updated error message in `server_server.cpp`** — The federation request failure message now includes the actual error string from httplib (e.g., "Connection refused", "Host not found", "Timeout") instead of just the numeric error code.
+
+**Status:** Real implementation
 
 ## Smoke test
 

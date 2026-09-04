@@ -44,6 +44,9 @@ public:
     // Get appservice info
     std::optional<AppserviceRegistration> get_appservice(const std::string& appservice_id) const;
 
+    // Get all appservices (for alias matching)
+    const std::map<std::string, AppserviceRegistration>& get_all_appservices() const;
+
     // Handle appservice transaction
     nlohmann::json handle_transaction(
         const std::string& appservice_id,

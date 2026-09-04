@@ -87,6 +87,11 @@ std::optional<AppserviceRegistration> AppserviceManager::get_appservice(
     return std::nullopt;
 }
 
+const std::map<std::string, AppserviceRegistration>& AppserviceManager::get_all_appservices() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return appservices_;
+}
+
 nlohmann::json AppserviceManager::handle_transaction(
     const std::string& appservice_id,
     const nlohmann::json& request) {

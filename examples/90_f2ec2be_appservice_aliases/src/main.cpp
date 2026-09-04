@@ -39,6 +39,7 @@ using json = nlohmann::json;
 #include <optional>
 #include <string>
 #include <string_view>
+#include <regex>
 
 namespace {
 
@@ -325,6 +326,23 @@ ruma::MatrixResult<ruma::GetAliasResponse> get_alias_route(
   auto room_id = ctx->data->id_from_alias(room_alias);
   if (!room_id) {
     std::cerr << "[debug] Room alias not found locally.\n";
+
+    // NEW in f2ec2be: Check appservice aliases before trying remote
+    // Only query appservices whose alias regex matches the room alias
+    for (const auto& [appservice_id, reg] : ctx->appservice_manager.get_all_appservices()) {
+      for (const auto& alias_regex : reg.namespaces_aliases) {
+        try {
+          std::regex regex(alias_regex);
+          if (std::regex_match(room_alias, regex)) {
+            std::cerr << "[debug] Alias " << room_alias << " matches appservice " << appservice_id << "\n";
+            // TODO: Query appservice for the alias via federation
+            // For now, skip as we don't have federation query for appservice aliases implemented
+          }
+        } catch (const std::regex_error& e) {
+          std::cerr << "[warn] Invalid alias regex for appservice " << appservice_id << ": " << e.what() << "\n";
+        }
+      }
+    }
 
     // If alias is remote (e.g., #room:server), try to resolve it from the remote server
     if (room_alias.rfind("#", 0) == 0) {

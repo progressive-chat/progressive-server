@@ -802,10 +802,14 @@ int main(int argc, char** argv) {
       return;
     }
 
-    // Logout all devices except the current one.
-    for (const auto& device : ctx.data->all_device_ids(*user)) {
-      if (device == current_device) continue;
-      ctx.data->remove_device(*user, device);
+    // NEW in ebb38cd: Respect logout_devices parameter
+    bool logout_devices = body.value("logout_devices", true);
+    if (logout_devices) {
+      // Logout all devices except the current one.
+      for (const auto& device : ctx.data->all_device_ids(*user)) {
+        if (device == current_device) continue;
+        ctx.data->remove_device(*user, device);
+      }
     }
 
     ruma::respond(res, json::object());

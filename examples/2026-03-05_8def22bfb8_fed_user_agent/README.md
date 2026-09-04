@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@8def22bfb8`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| Outgoing federation requests include `User-Agent: Conduit/0.11.0-alpha (V1_13)` header. | Translated to C++ with the same wire shape and behavior. |
+| Outgoing federation requests include `User-Agent: Conduit/0.11.0-alpha (V1_13)` header. | **Already implemented** — User-Agent header set in `send_request` |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+The `send_request` function in `server_server.cpp` (line 113) sets:
+```cpp
+{"User-Agent", "Conduit/0.11.0-alpha"},
+```
+
+This matches the Conduit behavior.
+
+**Status:** Already implemented
 
 ## Smoke test
 

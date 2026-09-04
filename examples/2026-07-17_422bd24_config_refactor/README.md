@@ -6,12 +6,13 @@ Source: [`timokoesters/conduit@422bd24`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Moves configuration to a separate crate. No-op (we use env-var-only configuration). | Translated to C++ with the same wire shape and behavior. |
+| Moves configuration to a separate crate. No-op (we use env-var-only configuration). | **No-op for C++** — We use env-var-only configuration, no separate config crate |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This is a Rust-specific refactor to move configuration to a separate crate. Our C++ implementation uses environment variables directly, so this is a no-op.
+
+**Status:** No-op for C++
 
 ## Smoke test
 

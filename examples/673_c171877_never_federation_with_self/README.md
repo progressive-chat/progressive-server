@@ -6,12 +6,15 @@ Source: [`timokoesters/conduit@c171877`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Fix: never try federation with self. Prevent self-federation attempts. | **Translated** — Our federation (step 29) skips self. This ensures it in Rust. |
+| Fix: never try federation with self. Prevent self-federation attempts. | **Already implemented** — Our `federation_send_to_remotes` (line 92) skips servers matching our hostname. |
 
 ## Implementation details
 
-- Our federation (step 29) skips self. This ensures it in Rust.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+- **main.cpp (federation_send_to_remotes)**: Already contains `if (srv == ctx->data->hostname()) continue;` to skip self-federation.
+
+This fix was already present in our federation implementation from earlier steps.
+
+**Status:** Already implemented (no changes needed).
 
 ## Smoke test
 

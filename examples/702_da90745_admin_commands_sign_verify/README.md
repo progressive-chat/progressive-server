@@ -6,12 +6,24 @@ Source: [`timokoesters/conduit@da90745`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Admin commands to sign and verify jsons. JSON signing/verification admin commands. 1 file changed. | **Translated** — Our admin commands (step 60) don't have sign/verify. This adds them. |
+| Admin commands to sign and verify jsons. JSON signing/verification admin commands. 1 file changed. | **Requires admin infrastructure** — Our admin commands don't have sign/verify yet. |
 
 ## Implementation details
 
-- Our admin commands (step 60) don't have sign/verify. This adds them.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This Conduit commit adds two admin commands:
+
+1. **SignJson**: Signs a JSON object with the server's signing key
+   - Accepts JSON in a code block (```json```)
+   - Uses `ruma::signatures::sign_json` with server keypair
+   - Returns the signed JSON
+
+2. **VerifyJson**: Verifies a JSON object's signatures
+   - Accepts JSON in a code block
+   - Fetches required signing keys via `fetch_required_signing_keys`
+   - Uses `ruma::signatures::verify_json` to verify
+   - Returns "Signature correct" or error
+
+**Status:** Requires admin command infrastructure (step 60+) and JSON signing utilities. Our implementation doesn't have `ruma::signatures` equivalent.
 
 ## Smoke test
 

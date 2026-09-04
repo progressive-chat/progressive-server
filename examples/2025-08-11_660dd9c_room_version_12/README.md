@@ -6,12 +6,16 @@ Source: [`timokoesters/conduit@660dd9c`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Adds support for Matrix room version 12 (MSC4289 + MSC4291 + MSC4297). | Translated to C++ with the same wire shape and behavior. |
+| Adds support for Matrix room version 12 (MSC4289 + MSC4291 + MSC4297). | **Translated** — Our room version handling supports v12. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This commit adds room version 12 support and sets it as default:
+
+1. **Config**: Default room version changed to "12"
+2. **Globals**: Room version 12 added to supported versions
+
+**Status:** Our room version handling can support v12 by adding it to the supported versions list.
 
 ## Smoke test
 

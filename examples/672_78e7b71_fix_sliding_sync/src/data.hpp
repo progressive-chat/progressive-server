@@ -197,6 +197,17 @@ class Data {
   std::vector<std::string> pdus_since(const std::string& room_id,
                                       uint64_t since) const;
 
+  // --- NEW in e4f7699: sliding sync (MSC3575) -----------------------------------
+  /// Get timeline PDUs for a room since a given count, with limit
+  /// Returns pair of (pdus_json, limited)
+  std::pair<std::vector<std::string>, bool> get_timeline_pdus(
+      const std::string& room_id, uint64_t since, uint64_t limit) const;
+  /// Get required state events for a room
+  std::vector<std::string> get_required_state(
+      const std::string& room_id, const std::vector<std::pair<std::string, std::string>>& state_keys) const;
+  /// Get room name for sliding sync
+  std::string get_room_name(const std::string& room_id) const;
+
   // --- displayname (folded prerequisite + fa9e127a-era semantics) -------------
   std::optional<std::string> displayname_get(const std::string& user_id) const;
   /// Set a new displayname. NEW in 4cc0a070: required (not optional) and

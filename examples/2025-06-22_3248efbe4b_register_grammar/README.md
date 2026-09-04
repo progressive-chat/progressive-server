@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@3248efbe4b`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| `register_route` rejects localparts that don't match the strict grammar; returns M_INVALID_USERNAME. | Translated to C++ with the same wire shape and behavior. |
+| `register_route` rejects localparts that don't match the strict grammar; returns M_INVALID_USERNAME. | **Translated** — Our `localpart_valid` uses strict validation. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This commit changes user ID validation from `!is_historical()` to `validate_strict()`:
+
+1. **get_register_available_route**: Uses `validate_strict()` instead of `!is_historical()`
+2. **register_route**: Same change for registration validation
+
+**Our implementation**: Our `localpart_valid` in handlers.cpp already enforces strict grammar (alphanumeric, underscore, hyphen, dot).
+
+**Status:** Already implemented (no changes needed).
 
 ## Smoke test
 

@@ -6,14 +6,20 @@ Source: [`timokoesters/conduit@835cf80`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Fix pushers** | **Translated** — Pusher fixes |
-| **Major pusher refactor** | **Translated** — Pusher database refactor |
+| **Fix pushers** | **No-op for C++** — Removes debug prints |
+| **Major pusher refactor** | **No-op for C++** — Our code doesn't have debug prints |
 
 ## Implementation details
 
-1. **Pusher fixes** — Fixed pusher code
-2. **Pusher database refactor** — Major refactor of pusher database
-3. **Sending improvements** — Improved pusher sending
+This commit removes debug statements (`dbg!()`, `println!()`) from the pusher code:
+
+1. **Removed `dbg!()` and `println!()`** — Debug macros removed from pusher code
+2. **Removed `Display` implementation** for `OutgoingKind` (unused)
+3. **Code cleanup** — Removed unused code and debug statements
+
+**In C++:** We don't use Rust's `dbg!()` macro or `println!()` for debugging in production code. Our C++ code uses `std::cerr` for logging.
+
+**Status:** No-op for C++ (cleanup of Rust-specific debug macros)
 
 ## Smoke test
 

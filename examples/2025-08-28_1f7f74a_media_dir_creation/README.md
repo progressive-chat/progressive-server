@@ -6,12 +6,17 @@ Source: [`timokoesters/conduit@1f7f74a`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Creates the media directory only when a new file is uploaded (not on startup). No-op (we always create on startup). | Translated to C++ with the same wire shape and behavior. |
+| Creates the media directory only when a new file is uploaded (not on startup). No-op (we always create on startup). | **Requires media implementation** — Our media handling can be optimized. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This fix optimizes media directory creation:
+
+1. **Removed**: `fs::create_dir_all` from `get_media_path` (called on every media access)
+2. **Added**: Directory creation only in `create_file` when actually uploading a new file
+3. **Only for Deep directory structure**: Only creates parent directories for deep structure
+
+**Status:** Our media implementation (step 83+) may have similar optimization opportunity.
 
 ## Smoke test
 

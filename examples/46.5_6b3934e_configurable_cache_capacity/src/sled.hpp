@@ -59,8 +59,8 @@ class Tree {
 };
 
 class Db {
- public:
-  static Db open(const std::filesystem::path& dir);
+  public:
+    static Db open(const std::filesystem::path& dir, uint64_t cache_capacity = 1024 * 1024 * 1024);
 
   // Non-copyable (owns raw handles); movable not needed here.
   Db(const Db&) = delete;

@@ -46,8 +46,7 @@ static std::string load_or_generate_keypair(sled::Db& storage) {
 }
 
 Data::Data(const std::filesystem::path& dir, uint64_t cache_capacity)
-    : db_storage_(sled::Db::open(dir)), db_(database::Database::open(&db_storage_)) {
-  (void)cache_capacity;  // TODO: implement cache capacity configuration for RocksDB
+    : db_storage_(sled::Db::open(dir, cache_capacity)), db_(database::Database::open(&db_storage_)) {
   hostname_ = db_storage_.get_root("hostname").value_or("localhost");
   keypair_ = load_or_generate_keypair(db_storage_);
 }
@@ -899,6 +898,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

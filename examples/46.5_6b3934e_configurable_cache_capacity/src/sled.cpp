@@ -3,6 +3,9 @@
 #include <memory>
 #include <stdexcept>
 
+#include <rocksdb/table.h>
+#include <rocksdb/cache.h>
+
 namespace sled {
 
 std::optional<std::string> Tree::get(const std::string& key) const {
@@ -94,7 +97,7 @@ std::vector<std::pair<std::string, std::string>> Tree::iter_all() const {
   return out;
 }
 
-Db Db::open(const std::filesystem::path& dir) {
+Db Db::open(const std::filesystem::path& dir, uint64_t cache_capacity) {
   std::filesystem::create_directories(dir);
 
   // Reopening must describe every existing column family, so list them first.
@@ -104,9 +107,17 @@ Db Db::open(const std::filesystem::path& dir) {
   if (!listed.ok()) existing.clear();  // fresh database
   if (existing.empty()) existing.push_back(rocksdb::kDefaultColumnFamilyName);
 
+  // Create shared block cache for all column families
+  std::shared_ptr<rocksdb::Cache> block_cache = rocksdb::NewLRUCache(cache_capacity);
+
   std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
   for (const std::string& name : existing) {
-    descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions());
+    rocksdb::ColumnFamilyOptions cf_options;
+    // Configure block cache based on cache_capacity
+    rocksdb::BlockBasedTableOptions table_options;
+    table_options.block_cache = block_cache;
+    cf_options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(table_options));
+    descriptors.emplace_back(name, cf_options);
   }
 
   rocksdb::DBOptions db_options;

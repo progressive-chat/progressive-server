@@ -53,36 +53,41 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
                     sled::Tree ti,
                     sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
                    sled::Tree rs2,
-                   sled::Tree sp, sled::Tree ps, sled::Tree rsh)
-     : userid_password(std::move(up)),
-      userid_deviceids(std::move(ud)),
-      userdeviceid_token(std::move(ut)),
-      token_userid(std::move(tu)),
-      pduid_pdus(std::move(pp)),
-      roomid_pduleaves(std::move(rl)),
-      eventid_pduid(std::move(ep)),
-      roomstateid_pdu(std::move(rs)),
-      roomid_userids(std::move(ru)),
-      userid_roomids(std::move(ur)),
-      userid_inviteroomids(std::move(ui)),
-      userid_displayname(std::move(dn)),
-      userid_leftroomids(std::move(ul)),
-      media(std::move(mf)),
-      uiaa(std::move(ua)),
-      alias_roomid(std::move(ar)),
-      aliasid_alias(std::move(aa)),
-      publicroomids(std::move(pr)),
-      roomuseroncejoinedids(std::move(ro)),
-      userdevicetxnid_response(std::move(ti)),
-      backupid_algorithm(std::move(ba)),
-      backupid_etag(std::move(be)),
-      backupkeyid_backup(std::move(bb)),
-      backup_latest(std::move(bl)),
-      roomserverids(std::move(rs2)),
-      // NEW in c4f5a0a6: state resolution trees
-      stateid_pduid(std::move(sp)),
-      pduid_statehash(std::move(ps)),
-      roomid_statehash(std::move(rsh)) {}
+                   sled::Tree sp, sled::Tree ps, sled::Tree rsh,
+                   MultiValue sc, MultiValue sp2, sled::Tree sc2)
+      : userid_password(std::move(up)),
+       userid_deviceids(std::move(ud)),
+       userdeviceid_token(std::move(ut)),
+       token_userid(std::move(tu)),
+       pduid_pdus(std::move(pp)),
+       roomid_pduleaves(std::move(rl)),
+       eventid_pduid(std::move(ep)),
+       roomstateid_pdu(std::move(rs)),
+       roomid_userids(std::move(ru)),
+       userid_roomids(std::move(ur)),
+       userid_inviteroomids(std::move(ui)),
+       userid_displayname(std::move(dn)),
+       userid_leftroomids(std::move(ul)),
+       media(std::move(mf)),
+       uiaa(std::move(ua)),
+       alias_roomid(std::move(ar)),
+       aliasid_alias(std::move(aa)),
+       publicroomids(std::move(pr)),
+       roomuseroncejoinedids(std::move(ro)),
+       userdevicetxnid_response(std::move(ti)),
+       backupid_algorithm(std::move(ba)),
+       backupid_etag(std::move(be)),
+       backupkeyid_backup(std::move(bb)),
+       backup_latest(std::move(bl)),
+       roomserverids(std::move(rs2)),
+       // NEW in c4f5a0a6: state resolution trees
+       stateid_pduid(std::move(sp)),
+       pduid_statehash(std::move(ps)),
+       roomid_statehash(std::move(rsh)),
+       // NEW in 9d49d59: space hierarchies (MSC2946)
+       roomid_space_children(std::move(sc)),
+       roomid_space_parents(std::move(sp2)),
+       roomid_space_chunk(std::move(sc2)) {}
 
 Database Database::open(sled::Db* db) {
   return Database(db->open_tree("userid_password"),
@@ -109,11 +114,15 @@ Database Database::open(sled::Db* db) {
                   db->open_tree("backupid_etag"),
                   db->open_tree("backupkeyid_backup"),
                   db->open_tree("backup_latest"),
-                  db->open_tree("roomserverids"),
-                  // NEW in c4f5a0a6: state resolution trees
-                  db->open_tree("stateid_pduid"),
-                  db->open_tree("pduid_statehash"),
-                  db->open_tree("roomid_statehash"));
+db->open_tree("roomserverids"),
+                   // NEW in c4f5a0a6: state resolution trees
+                   db->open_tree("stateid_pduid"),
+                   db->open_tree("pduid_statehash"),
+                   db->open_tree("roomid_statehash"),
+                   // NEW in 9d49d59: space hierarchies (MSC2946)
+                   MultiValue(db->open_tree("roomid_space_children")),
+                   MultiValue(db->open_tree("roomid_space_parents")),
+                   db->open_tree("roomid_space_chunk"));
 }
 
 }  // namespace database

@@ -1279,6 +1279,141 @@ int main(int argc, char** argv) {
     ruma::respond(res, get_public_rooms_filtered_route(&ctx, search));
   });
 
+  // NEW in 9d49d59: Space hierarchy endpoint (MSC2946) — GET /rooms/<id>/hierarchy
+  // Returns the space hierarchy for a room
+  svr.Get(R"(/_matrix/client/r0/rooms/(.+)/hierarchy)",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+    const auto token = extract_token(req);
+    std::optional<std::string> user;
+    if (!token || !(user = ctx.data->user_from_token(*token))) {
+      ruma::respond(res,
+                    nlohmann::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                   {"error", "Unrecognised access token"}},
+                    401);
+      return;
+    }
+    const std::string room_id = req.matches[1];
+    // Check if user can see this room's state
+    if (!ctx.data->user_can_see_state_events(*user, room_id)) {
+      ruma::respond(res,
+                    nlohmann::json{{"errcode", "M_FORBIDDEN"},
+                                   {"error", "You don't have permission to view this room."}},
+                    403);
+      return;
+    }
+
+    // Parse query parameters
+    size_t limit = 100;
+    size_t skip = 0;
+    size_t max_depth = 3;
+    bool suggested_only = false;
+    if (req.has_param("limit")) {
+      try { limit = std::stoull(req.get_param_value("limit")); } catch (...) {}
+    }
+    if (req.has_param("skip")) {
+      try { skip = std::stoull(req.get_param_value("skip")); } catch (...) {}
+    }
+    if (req.has_param("max_depth")) {
+      try { max_depth = std::stoull(req.get_param_value("max_depth")); } catch (...) {}
+    }
+    if (req.has_param("suggested_only")) {
+      suggested_only = req.get_param_value("suggested_only") == "true";
+    }
+
+    // Check cache first
+    if (auto cached = ctx.data->space_chunk_get(room_id)) {
+      ruma::respond(res, nlohmann::json::parse(*cached));
+      return;
+    }
+
+    // Simple hierarchy traversal (DFS with depth limit)
+    nlohmann::json results = nlohmann::json::array();
+    std::vector<std::pair<std::string, size_t>> stack = {{room_id, 0}};  // {room_id, depth}
+    size_t skipped = 0;
+
+    while (!stack.empty() && results.size() < limit) {
+      auto [current_room, depth] = stack.back();
+      stack.pop_back();
+
+      if (depth > max_depth) continue;
+
+      // Check cache for this room
+      if (auto cached = ctx.data->space_chunk_get(current_room)) {
+        auto chunk = nlohmann::json::parse(*cached);
+        if (skipped >= skip) {
+          results.push_back(chunk);
+        } else {
+          skipped++;
+        }
+        // Add children to stack
+        for (const auto& child : ctx.data->space_children(current_room)) {
+          stack.push_back({child, depth + 1});
+        }
+        continue;
+      }
+
+      // Build chunk for this room
+      std::string name = "";
+      std::string canonical_alias = "";
+      std::string topic = "";
+      std::string avatar = "";
+      std::string join_rule = "invite";
+
+      for (const auto& pdu_text : ctx.data->room_state(current_room)) {
+        auto pdu = nlohmann::json::parse(pdu_text);
+        std::string type = pdu.value("type", "");
+        if (type == "m.room.name") {
+          name = pdu["content"].value("name", "");
+        } else if (type == "m.room.canonical_alias") {
+          canonical_alias = pdu["content"].value("alias", "");
+        } else if (type == "m.room.topic") {
+          topic = pdu["content"].value("topic", "");
+        } else if (type == "m.room.avatar") {
+          avatar = pdu["content"].value("url", "");
+        } else if (type == "m.room.join_rules") {
+          join_rule = pdu["content"].value("join_rule", "invite");
+        }
+      }
+
+      // Get children
+      auto children = ctx.data->space_children(current_room);
+
+      nlohmann::json chunk = {
+          {"room_id", current_room},
+          {"name", name},
+          {"canonical_alias", canonical_alias},
+          {"topic", topic},
+          {"avatar_url", avatar},
+          {"join_rule", join_rule},
+          {"num_joined_members", static_cast<int>(ctx.data->room_users(current_room))},
+          {"world_readable", false},
+          {"guest_can_join", false},
+          {"children", nlohmann::json::array()},  // Simplified: no nested children in chunk
+          {"parents", nlohmann::json::array()}    // Simplified
+      };
+
+      // Cache the chunk
+      ctx.data->space_chunk_set(current_room, chunk.dump());
+
+      if (skipped >= skip) {
+        results.push_back(chunk);
+      } else {
+        skipped++;
+      }
+
+      // Add children to stack
+      for (const auto& child : children) {
+        stack.push_back({child, depth + 1});
+      }
+    }
+
+    ruma::respond(res, nlohmann::json{
+        {"rooms", std::move(results)},
+        {"next_batch", nlohmann::json(nullptr)},
+        {"prev_batch", nlohmann::json(nullptr)}
+    });
+  });
+
   svr.Put(R"(/_matrix/client/r0/rooms/(.+)/send/(.+)/(.+))",
           [&ctx](const httplib::Request& req, httplib::Response& res) {
             auto wrapper = ruma::Ruma<ruma::CreateMessageEventRequest>::from_request(req);

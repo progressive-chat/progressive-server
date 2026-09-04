@@ -854,6 +854,43 @@ std::vector<std::string> Data::pdus_since(const std::string& room_id,
   return pdus;
 }
 
+// --- NEW in 9d49d59: space hierarchies (MSC2946) ---------------------------------
+std::vector<std::string> Data::space_children(const std::string& room_id) const {
+  std::vector<std::string> children;
+  for (const auto& [key, value] : db_.roomid_space_children.get_iter(room_id)) {
+    children.push_back(value);
+  }
+  return children;
+}
+
+std::vector<std::string> Data::space_parents(const std::string& room_id) const {
+  std::vector<std::string> parents;
+  for (const auto& [key, value] : db_.roomid_space_parents.get_iter(room_id)) {
+    parents.push_back(value);
+  }
+  return parents;
+}
+
+void Data::space_add_child(const std::string& parent_room_id, const std::string& child_room_id) {
+  db_.roomid_space_children.add(parent_room_id, child_room_id);
+  db_.roomid_space_parents.add(child_room_id, parent_room_id);
+}
+
+void Data::space_remove_child(const std::string& parent_room_id, const std::string& child_room_id) {
+  db_.roomid_space_children.remove_value(parent_room_id, child_room_id);
+  db_.roomid_space_parents.remove_value(child_room_id, parent_room_id);
+}
+
+std::optional<std::string> Data::space_chunk_get(const std::string& room_id) const {
+  if (const auto v = db_.roomid_space_chunk.get(room_id))
+    return *v;
+  return std::nullopt;
+}
+
+void Data::space_chunk_set(const std::string& room_id, const std::string& chunk_json) {
+  db_.roomid_space_chunk.insert(room_id, chunk_json);
+}
+
 // --- NEW in abcce95d: invites & state -------------------------------------------
 
 std::vector<std::string> Data::room_state(const std::string& room_id) const {
@@ -942,6 +979,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

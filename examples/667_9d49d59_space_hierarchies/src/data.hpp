@@ -204,6 +204,20 @@ class Data {
   bool displayname_set(const std::string& user_id, const std::string& displayname);
   void displayname_remove(const std::string& user_id);
 
+  // --- NEW in 9d49d59: space hierarchies (MSC2946) ---------------------------------
+  /// Get children of a space room
+  std::vector<std::string> space_children(const std::string& room_id) const;
+  /// Get parents of a space room
+  std::vector<std::string> space_parents(const std::string& room_id) const;
+  /// Add a space child relationship
+  void space_add_child(const std::string& parent_room_id, const std::string& child_room_id);
+  /// Remove a space child relationship
+  void space_remove_child(const std::string& parent_room_id, const std::string& child_room_id);
+  /// Get cached space hierarchy chunk
+  std::optional<std::string> space_chunk_get(const std::string& room_id) const;
+  /// Set cached space hierarchy chunk
+  void space_chunk_set(const std::string& room_id, const std::string& chunk_json);
+
   // --- NEW in abcce95d: invites & state ----------------------------------------
   // Current state events of a room, as raw canonical JSON strings.
   std::vector<std::string> room_state(const std::string& room_id) const;

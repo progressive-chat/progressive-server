@@ -69,6 +69,14 @@ class Database {
   Media media;                     // NEW in 821c608c: media repository
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
+  // NEW in 9d49d59: space hierarchies (MSC2946)
+  // Space child relationship: room_id + 0xff + "space_child" + 0xff + child_room_id -> ""
+  MultiValue roomid_space_children;
+  // Space parent relationship: child_room_id + 0xff + "space_parent" + 0xff + parent_room_id -> ""
+  MultiValue roomid_space_parents;
+  // Space chunk cache: room_id -> cached hierarchy chunk
+  sled::Tree roomid_space_chunk;
+
   private:
   Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
             sled::Tree pp, MultiValue rl, sled::Tree ep,
@@ -81,7 +89,9 @@ class Database {
             sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
             sled::Tree rs2,
             // NEW in c4f5a0a6: state resolution trees
-            sled::Tree sp, sled::Tree ps, sled::Tree rsh);
+            sled::Tree sp, sled::Tree ps, sled::Tree rsh,
+            // NEW in 9d49d59: space hierarchies (MSC2946)
+            MultiValue sc, MultiValue sp2, sled::Tree sc2);
 };
 
 }  // namespace database

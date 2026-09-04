@@ -6,12 +6,14 @@ Source: [`timokoesters/conduit@47216ee`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Adds `WELL_KNOWN_CLIENT`/`WELL_KNOWN_SERVER` env vars to override defaults; respects `X-Forwarded-For` for client IP. | Translated to C++ with the same wire shape and behavior. |
+| Adds `WELL_KNOWN_CLIENT`/`WELL_KNOWN_SERVER` env vars to override defaults; respects `X-Forwarded-For` for client IP. | **Partial** — WELL_KNOWN env vars implemented; X-Forwarded-For not yet handled |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+- **WELL_KNOWN_CLIENT/SERVER env vars** — Implemented in main.cpp (lines 674-675)
+- **X-Forwarded-For support** — Not yet implemented in rate limiting bucket key
+
+**Status:** Partial implementation — WELL_KNOWN env vars done, X-Forwarded-For pending
 
 ## Smoke test
 

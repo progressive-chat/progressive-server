@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@08366bf`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| `openid/request_token` enforces `body.user_id == sender_user`; `extract_token` prefers Authorization header over `?access_token=`. | Translated to C++ with the same wire shape and behavior. |
+| `openid/request_token` enforces `body.user_id == sender_user`; `extract_token` prefers Authorization header over `?access_token=`. | **Already implemented** — `extract_token` prefers Authorization header |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+The `extract_token` function in handlers.cpp already:
+1. First checks for `Authorization: Bearer <token>` header
+2. Falls back to `access_token` query parameter if no header
+2. Returns nullopt if neither present
+
+This matches the Conduit fix.
+
+**Status:** Already implemented
 
 ## Smoke test
 

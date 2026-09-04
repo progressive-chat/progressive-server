@@ -6,12 +6,20 @@ Source: [`timokoesters/conduit@0b4e3de`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Fix: spaces with restricted rooms. Space hierarchy compatibility with restricted rooms. | **Translated** — Follows step 667 (space hierarchies). Fixes restricted room handling in spaces. |
+| Fix: spaces with restricted rooms. Space hierarchy compatibility with restricted rooms. | **Requires step 667** — This fix applies to space hierarchies (MSC2946) implemented in step 667. |
 
 ## Implementation details
 
-- Follows step 667 (space hierarchies). Fixes restricted room handling in spaces.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This Conduit commit fixes restricted room handling in space hierarchies:
+
+1. **Cached join rules**: Introduces `CachedJoinRule` enum with `Simplified` (SpaceRoomJoinRule) and `Full` (JoinRule) variants
+2. **Simplified join rule handling**: New `handle_simplified_join_rule` for public/knock/invite rules
+3. **Federation response handling**: Uses simplified join rule from federation responses
+3. **Restricted/knock-restricted rooms**: Returns false for restricted/knock-restricted (TODO: check rules)
+
+**Status:** Requires step 667 (space hierarchies) to be fully implemented. This fix would be applied on top of step 667's `space_chunk_get`/`space_chunk_set` and hierarchy traversal.
+
+**Note:** Our step 667 implements space hierarchies, but this fix would need to be integrated into the hierarchy traversal logic.
 
 ## Smoke test
 

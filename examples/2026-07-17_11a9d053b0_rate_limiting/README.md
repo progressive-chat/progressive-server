@@ -6,12 +6,23 @@ Source: [`timokoesters/conduit@11a9d053b0`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| Adds `rate_limiting.{hpp,cpp}` with `PrivateSmall` preset and sliding window per (action, IP+token). | Translated to C++ with the same wire shape and behavior. |
+| Adds `rate_limiting.{hpp,cpp}` with `PrivateSmall` preset and sliding window per (action, IP+token). | **Translated** — Full C++ implementation with `rate_limiting.{hpp,cpp}` |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+1. **Added `rate_limiting.{hpp,cpp}`** with:
+   - `Restriction` enum for all action types (Registration, Login, SendEvent, Join, Invite, Knock, etc.)
+   - Sliding window rate limiter per (Restriction, IP+token) bucket
+   - Per-action limits matching Conduit's "PrivateSmall" preset
+   - Test mode via `CONDUIT_RATE_LIMIT_TEST` env var
+
+2. **Integration in main.cpp**:
+   - Creates `RateLimiter` instance
+   - Adds to `Context` struct
+   - Pre-request hook checks rate limits
+   - Returns `M_LIMIT_EXCEEDED` with `retry_after_ms` on overflow
+
+**Status:** Full implementation
 
 ## Smoke test
 

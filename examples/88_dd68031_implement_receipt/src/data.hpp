@@ -118,7 +118,7 @@ class Data {
 
   // NEW in db8a0c5: helper methods for PDU lookup
   std::optional<std::string> get_pdu_id(const std::string& event_id) const;
-  uint64_t pdu_count(const std::string& pdu_id) const;
+  std::optional<uint64_t> pdu_count(const std::string& pdu_id) const;
 
   // --- NEW in b6c0e9bf: access control ----------------------------------------
   bool is_joined(const std::string& user_id, const std::string& room_id) const;
@@ -209,6 +209,17 @@ class Data {
   // NEW: all pdus of one room with stream index > since.
   std::vector<std::string> pdus_since(const std::string& room_id,
                                       uint64_t since) const;
+
+  // --- NEW in dd68031: read receipts (EDUs) ----------------------------------
+  /// Set a private read marker for a user in a room up to a specific event.
+  void private_read_set(const std::string& room_id,
+                        const std::string& user_id,
+                        uint64_t pdu_count);
+  /// Update read receipts for a user in a room.
+  void readreceipt_update(const std::string& user_id,
+                          const std::string& room_id,
+                          const std::string& event_id,
+                          int64_t timestamp);
 
   // --- displayname (folded prerequisite + fa9e127a-era semantics) -------------
   std::optional<std::string> displayname_get(const std::string& user_id) const;

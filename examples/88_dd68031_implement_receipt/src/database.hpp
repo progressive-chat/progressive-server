@@ -64,6 +64,10 @@ sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
     Media media;                     // NEW in 821c608c: media repository
   Uiaa uiaa;                       // NEW in c85d363d: UIAA sessions
 
+  // NEW in dd68031: EDU trees for read receipts
+  MultiValue userid_receipt;        // user+0xff+room+0xff+event_id -> receipt json
+  MultiValue roomid_receipt;        // room+0xff+user -> receipt json
+
  private:
   Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
            sled::Tree pp, MultiValue rl, sled::Tree ep,
@@ -74,7 +78,9 @@ sled::Tree publicroomids;        // NEW in 3aa0c8ed: public rooms
            sled::Tree rs2,
            sled::Tree ro,
            sled::Tree ti,
-           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl);
+           sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
+           // NEW in dd68031: EDU trees for read receipts
+           MultiValue ur2, MultiValue rr);
 };
 
 }  // namespace database

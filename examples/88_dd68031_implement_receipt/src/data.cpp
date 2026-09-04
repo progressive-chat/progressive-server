@@ -802,6 +802,35 @@ std::vector<std::string> Data::pdus_since(const std::string& room_id,
   return pdus;
 }
 
+// --- NEW in dd68031: read receipts (EDUs) ----------------------------------
+void Data::private_read_set(const std::string& room_id,
+                            const std::string& user_id,
+                            uint64_t pdu_count) {
+  // Key format: user + 0xff + room_id + 0xff + event_id
+  // For simplicity, we store the pdu_count as the event_id reference
+  std::string key = user_id + static_cast<char>(0xff) + room_id + static_cast<char>(0xff) + std::to_string(pdu_count);
+  db_.userid_receipt.add(user_id + static_cast<char>(0xff) + room_id, key);
+  
+  // Also store reverse lookup: room -> user -> receipt
+  std::string room_key = room_id + static_cast<char>(0xff) + user_id;
+  db_.roomid_receipt.add(room_key, std::to_string(pdu_count));
+}
+
+void Data::readreceipt_update(const std::string& user_id,
+                              const std::string& room_id,
+                              const std::string& event_id,
+                              int64_t timestamp) {
+  // Store the receipt with timestamp
+  // Format: user + 0xff + room + 0xff + event_id -> timestamp
+  std::string key = user_id + static_cast<char>(0xff) + room_id + static_cast<char>(0xff) + event_id;
+  std::string value = std::to_string(timestamp);
+  db_.userid_receipt.add(key, value);
+  
+  // Also update room-level receipt
+  std::string room_key = room_id + static_cast<char>(0xff) + user_id;
+  db_.roomid_receipt.add(room_key, event_id + "|" + value);
+}
+
 // --- NEW in abcce95d: invites & state -------------------------------------------
 
 std::vector<std::string> Data::room_state(const std::string& room_id) const {
@@ -906,6 +935,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {
@@ -1088,8 +1118,9 @@ std::optional<std::variant<ClosestParentAppend, ClosestParentInsert>> Data::get_
     // Check if we have this PDU in our database
     if (auto pdu_id = get_pdu_id(id)) {
       // Found a known ancestor - return the count to insert after
-      uint64_t count = pdu_count(*pdu_id);
-      return ClosestParentInsert{count};
+      auto count_opt = pdu_count(*pdu_id);
+      if (!count_opt) return std::nullopt;
+      return ClosestParentInsert{*count_opt};
     }
 
     // If not found, add its auth events to the search
@@ -1105,7 +1136,7 @@ std::optional<std::string> Data::get_pdu_id(const std::string& event_id) const {
   return db_.eventid_pduid.get(event_id);
 }
 
-uint64_t Data::pdu_count(const std::string& pdu_id) const {
+std::optional<uint64_t> Data::pdu_count(const std::string& pdu_id) const {
   // For now, return 0 as placeholder
   // In a real implementation, we'd track the count in a separate tree
   return 0;

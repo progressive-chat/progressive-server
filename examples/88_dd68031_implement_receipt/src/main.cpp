@@ -1214,6 +1214,61 @@ int main(int argc, char** argv) {
              ruma::respond(res, json::object());
            });
 
+  // NEW in dd68031: POST /rooms/<room_id>/receipt/<receipt_type>/<event_id>
+  // Implements read receipts (m.receipt)
+  svr.Post(R"(/_matrix/client/r0/rooms/(.+)/receipt/(.+)/(.+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res, ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                             {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string room_id = req.matches[1];
+             const std::string receipt_type = req.matches[2];
+             const std::string event_id = req.matches[3];
+
+             // Only support m.read receipts for now
+             if (receipt_type != "m.read") {
+               ruma::respond(res,
+                             nlohmann::json{{"errcode", "M_UNRECOGNIZED"},
+                                            {"error", "Unsupported receipt type"}},
+                             400);
+               return;
+             }
+
+             // Check if user is in the room
+             if (!ctx.data->is_joined(*user, room_id)) {
+               ruma::respond(res,
+                             nlohmann::json{{"errcode", "M_FORBIDDEN"},
+                                            {"error", "User not in room"}},
+                             403);
+               return;
+             }
+
+             // Get the PDU count for the event
+             auto pdu_count_opt = ctx.data->pdu_count(event_id);
+             if (!pdu_count_opt) {
+               ruma::respond(res,
+                             nlohmann::json{{"errcode", "M_NOT_FOUND"},
+                                            {"error", "Event not found"}},
+                             404);
+               return;
+             }
+             uint64_t pdu_count = *pdu_count_opt;
+
+             // Set private read marker
+             ctx.data->private_read_set(room_id, *user, pdu_count);
+
+             // Update read receipt with current timestamp
+             int64_t timestamp = utils::millis_since_unix_epoch();
+             ctx.data->readreceipt_update(*user, room_id, event_id, timestamp);
+
+             ruma::respond(res, nlohmann::json::object());
+           });
+
   svr.Post(R"(/_matrix/client/r0/rooms/(.+)/forget)",
            [&ctx](const httplib::Request& req, httplib::Response& res) {
              const auto token = extract_token(req);

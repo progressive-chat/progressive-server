@@ -6,13 +6,20 @@ Source: [`timokoesters/conduit@7c4e116`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **State resolution outline for /send (cont.)** | **Translated** — More state resolution code |
-| **Add to /send handler** | **Translated** — Extended /send handler |
+| **State resolution outline for /send (cont.)** | **Requires full state resolution** — Not yet implemented |
+| **Add forward_extremity_ids, append_state, append_state_soft** | **Stubs added** — Functions added but not implemented |
 
 ## Implementation details
 
-1. **State resolution continuation** — More state resolution code in /send
-2. **Extended /send handler** — Additional /send handler logic
+This commit adds the missing function stubs referenced in step 64:
+
+1. **`forward_extremity_ids`** — Returns `todo!()`, needs implementation to find forward extremities
+2. **`append_state`** — Appends state event to room state (with appservice notification)
+3. **`append_state_soft`** — Appends state without updating room state hash (for soft-failed events)
+
+**Status:** Requires full state resolution infrastructure. Our C++ implementation doesn't have these functions yet.
+
+**Note:** This is part of the major federation state resolution refactor that requires the complete state resolution infrastructure from step 93 (short ID system) and step 57 (state resolution basics).
 
 ## Smoke test
 

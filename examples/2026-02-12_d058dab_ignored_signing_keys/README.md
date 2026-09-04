@@ -6,12 +6,15 @@ Source: [`timokoesters/conduit@d058dab`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Adds `ignored_server_signing_keys` config option to skip validating keys from specific servers. Not implemented (we don't have a config layer). | Translated to C++ with the same wire shape and behavior. |
+| Adds `ignored_server_signing_keys` config option to skip validating keys from specific servers. | **Not implemented** — No config layer for ignored signing keys |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This would require:
+1. Config option for `ignored_server_signing_keys` 
+2. Check in signature verification to skip listed servers
+
+**Status:** Not implemented — no config layer for ignored signing keys
 
 ## Smoke test
 

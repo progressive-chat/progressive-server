@@ -6,11 +6,17 @@ Source: [`timokoesters/conduit@d108a73`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **State resolution outline for /send** | **Translated** — More state resolution code |
+| **State resolution outline for /send** | **Requires full state resolution** — Not yet implemented |
 
 ## Implementation details
 
+This is another state resolution outline commit for the federation `/send` endpoint:
+
 1. **State resolution outline** — More state resolution code in /send
+
+**Status:** Requires full state resolution infrastructure (state_res crate equivalent) which is not yet implemented in C++. Our federation `/send` handler only has basic PDU storage.
+
+**Note:** This is part of the major federation state resolution refactor that requires the complete state resolution infrastructure from step 93 (short ID system) and step 57 (state resolution basics).
 
 ## Smoke test
 

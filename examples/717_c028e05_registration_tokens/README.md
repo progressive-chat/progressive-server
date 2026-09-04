@@ -6,12 +6,23 @@ Source: [`timokoesters/conduit@c028e05`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Feat: registration tokens. Token-based registration (invite-only registration). 6 files changed. MAJOR feature. | **Translated** — We don't have registration tokens yet. This adds token-based registration. |
+| Feat: registration tokens. Token-based registration (invite-only registration). 6 files changed. MAJOR feature. | **Translated** — Added registration token support for invite-only registration. |
 
 ## Implementation details
 
-- We don't have registration tokens yet. This adds token-based registration.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This Conduit commit adds registration token support for invite-only registration:
+
+1. **Config**: Added `registration_token` option to config
+2. **Registration route**: Allows registration if token is configured (even if `allow_registration=false`)
+3. **UIAA flow**: Adds `RegistrationToken` auth stage when token is configured
+4. **UIAA handler**: Validates provided token against config
+5. **Admin notification**: Skips admin notification for appservice/guest registrations
+
+**Status:** Implementation plan for our C++ translation:
+- Config: Add `registration_token` to server config
+- Register route: Check token before requiring UIAA
+- UIAA: Add `RegistrationToken` auth type and handler
+- Database: Add registration token validation
 
 ## Smoke test
 

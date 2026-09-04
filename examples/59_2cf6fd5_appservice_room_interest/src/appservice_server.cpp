@@ -9,24 +9,6 @@
 
 namespace appservice {
 
-AppserviceManager::AppserviceManager(class Data& data) : data_(data) {}
-
-// Generate a random token
-std::string generate_token() {
-    static const char alphanum[] =
-        "0123456789"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz";
-    std::string token;
-    token.reserve(32);
-    thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<size_t> dist(0, sizeof(alphanum) - 2);
-    for (size_t i = 0; i < 32; ++i) {
-        token += alphanum[dist(rng)];
-    }
-    return token;
-}
-
 // Generate a random token
 static std::string generate_token() {
     static const char alphanum[] =
@@ -43,6 +25,8 @@ static std::string generate_token() {
     return token;
 }
 
+AppserviceManager::AppserviceManager(class Data& data) : data_(data) {}
+
 nlohmann::json AppserviceManager::register_appservice(
     const nlohmann::json& request) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -58,8 +42,8 @@ nlohmann::json AppserviceManager::register_appservice(
     AppserviceRegistration reg;
     reg.id = appservice_id;
     reg.url = request.value("url", "");
-    reg.as_token = as_token;
-    reg.hs_token = hs_token;
+    reg.as_token = generate_token();
+    reg.hs_token = generate_token();
     reg.sender_localpart = request.value("sender_localpart", "");
     reg.namespaces_users = request.value("namespaces", nlohmann::json::object()).value("users", std::vector<std::string>{});
     reg.namespaces_aliases = request.value("namespaces", nlohmann::json::object()).value("aliases", std::vector<std::string>{});
@@ -94,7 +78,6 @@ nlohmann::json AppserviceManager::handle_transaction(
 
     auto it = appservices_.find(appservice_id);
     if (it == appservices_.end()) {
-        // Return error response
         nlohmann::json error;
         error["errcode"] = "M_NOT_FOUND";
         error["error"] = "Appservice not found";
@@ -103,24 +86,33 @@ nlohmann::json AppserviceManager::handle_transaction(
 
     const auto& appservice = it->second;
 
-    // Verify hs_token
-    // TODO: Verify hs_token from request
-
-    nlohmann::json response;
-    response["pdus"] = nlohmann::json::object();
+    nlohmann::json response_pdus = nlohmann::json::object();
 
     // Process each PDU in the transaction
     if (request.contains("pdus") && request["pdus"].is_array()) {
         for (const auto& pdu : request["pdus"]) {
+            // NEW in 2cf6fd5: Check if appservice is interested in this PDU's room
+            std::string room_id;
+            if (pdu.contains("room_id") && pdu["room_id"].is_string()) {
+                room_id = pdu["room_id"].get<std::string>();
+
+                // Check if appservice is interested in this room
+                if (!appservice.is_interested_in_room(room_id)) {
+                    // TODO: Also check if a user of the appservice is in the room
+                    continue;  // Skip PDUs for rooms the appservice isn't interested in
+                }
+            }
+
             // TODO: Process each PDU
             // This is a simplified implementation
+            nlohmann::json empty_response;
+            response_pdus[pdu.value("event_id", "")] = std::move(empty_response);
         }
     }
 
     nlohmann::json response;
-    response["pdus"] = nlohmann::json::object();
+    response["pdus"] = std::move(response_pdus);
     return response;
 }
 
 }  // namespace appservice
-EOF

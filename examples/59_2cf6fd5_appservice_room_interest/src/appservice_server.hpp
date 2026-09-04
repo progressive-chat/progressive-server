@@ -20,6 +20,33 @@ struct AppserviceRegistration {
     std::vector<std::string> namespaces_aliases;
     std::vector<std::string> namespaces_rooms;
     bool rate_limited = false;
+
+    // NEW in 2cf6fd5: check if appservice is interested in a room
+    bool is_interested_in_room(const std::string& room_id) const {
+        for (const auto& pattern : namespaces_rooms) {
+            // Simple glob matching - * matches any characters
+            if (pattern == "*") return true;
+            if (pattern.back() == '*') {
+                std::string prefix = pattern.substr(0, pattern.size() - 1);
+                if (room_id.rfind(prefix, 0) == 0) return true;
+            }
+            if (pattern == room_id) return true;
+        }
+        return false;
+    }
+
+    // NEW in 2cf6fd5: check if appservice is interested in a user
+    bool is_interested_in_user(const std::string& user_id) const {
+        for (const auto& pattern : namespaces_users) {
+            if (pattern == "*") return true;
+            if (pattern.back() == '*') {
+                std::string prefix = pattern.substr(0, pattern.size() - 1);
+                if (user_id.rfind(prefix, 0) == 0) return true;
+            }
+            if (pattern == user_id) return true;
+        }
+        return false;
+    }
 };
 
 struct AppserviceRegistrationResponse {
@@ -51,7 +78,7 @@ public:
 
 private:
     class Data& data_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::map<std::string, AppserviceRegistration> appservices_;
 };
 

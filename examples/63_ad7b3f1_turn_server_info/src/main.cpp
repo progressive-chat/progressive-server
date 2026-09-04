@@ -2313,6 +2313,15 @@ int main(int argc, char** argv) {
             }
           });
 
+  // NEW in ad7b3f1: GET /_matrix/client/r0/voip/turnServer — returns 200 with empty TURN servers
+  // This prevents clients from retrying the endpoint every minute
+  svr.Get("/_matrix/client/r0/voip/turnServer",
+          [](const httplib::Request&, httplib::Response& res) {
+    ruma::respond(res,
+                  nlohmann::json{{"uris", nlohmann::json::array()}},
+                  200);
+  });
+
   // NEW: OPTIONS catch-all — upstream answers with a plain 404 M_NOT_FOUND.
   svr.Options(R"(.*)", [](const httplib::Request&, httplib::Response& res) {
     ruma::respond(res,

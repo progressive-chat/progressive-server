@@ -6,13 +6,16 @@ Source: [`timokoesters/conduit@ad7b3f1`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Send 200 response for turn server info** | **Translated** — Return 200 with empty TURN servers |
-| **Stop clients from retrying endpoint** | **Translated** — Proper response code |
+| **Send 200 response for turn server info** | **Translated** — Added GET /_matrix/client/r0/voip/turnServer endpoint |
+| **Stop clients from retrying endpoint** | **Translated** — Returns 200 with empty TURN servers |
 
 ## Implementation details
 
-1. **TURN server info endpoint** — Returns 200 OK with empty TURN server list
-2. **Client retry prevention** — Proper response stops clients from retrying every minute
+1. **Added GET /_matrix/client/r0/voip/turnServer endpoint** in main.cpp:
+   - Returns 200 OK with empty TURN servers list: `{"uris": []}`
+   - This prevents clients from retrying the endpoint every minute
+
+**Status:** Real implementation
 
 ## Smoke test
 

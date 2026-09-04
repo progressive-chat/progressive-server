@@ -6,12 +6,19 @@ Source: [`timokoesters/conduit@346913268f`](https://github.com/timokoesters/cond
 
 | Rust change | C++ translation |
 |---|---|
-| No-op — we don't have `populate_membership_template`; our local events build content from scratch. | Translated to C++ with the same wire shape and behavior. |
+| Preserves custom fields in membership template content instead of overwriting entirely. | **Requires federation** — Preserves custom fields in membership template helper. |
 
 ## Implementation details
 
-- All Conduit code changes are translated to the C++ architecture (httplib + RocksDB + nlohmann::json)
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This fix preserves custom fields in the membership template content:
+
+1. **Extracts existing content** from the template instead of creating new
+2. **Preserves `join_authorized_via_users_server`** and other custom fields
+3. **Merges new fields** (membership, displayname, avatar_url, blurhash, reason) into existing content
+4. **Only adds fields that are present** (displayname, avatar_url, blurhash are optional)
+5. **Removes manual `to_canonical_value` call** - content is built as CanonicalJsonObject
+
+**Status:** Requires federation with `populate_membership_template` (step 82b7cf6). Our federation doesn't have this helper.
 
 ## Smoke test
 

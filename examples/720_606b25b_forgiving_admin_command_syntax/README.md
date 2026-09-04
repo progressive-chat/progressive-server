@@ -6,12 +6,18 @@ Source: [`timokoesters/conduit@606b25b`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Improvement: more forgiving admin command syntax. Admin command parser improvements. 2 files changed. | **Translated** — Our admin commands (step 60, 702) parse strictly. This adds flexibility. |
+| Improvement: more forgiving admin command syntax. Admin command parser improvements. 2 files changed. | **Translated** — Added flexible admin command parsing. |
 
 ## Implementation details
 
-- Our admin commands (step 60, 702) parse strictly. This adds flexibility.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+This commit makes admin command parsing more forgiving:
+
+1. **Filter empty lines**: Skip empty lines when parsing admin commands (`filter(|l| !l.trim().is_empty())`)
+2. **Accept bare mentions**: Accept just `@conduit:server` or `@conduit:server:` without a command body
+
+**Our implementation (step 338/591)**: Already accepts both `@conduit:server command` and `@conduit:server: command` formats. Could add empty line filtering and bare mention handling.
+
+**Status:** Our admin command parsing is already flexible. Could add these minor improvements.
 
 ## Smoke test
 

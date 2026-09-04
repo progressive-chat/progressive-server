@@ -6,12 +6,20 @@ Source: [`timokoesters/conduit@88c6060`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| **Update room leaves with multiple eventIds** | **Translated** — Multi-id room leaves |
+| **Update room leaves with multiple eventIds** | **Partial** — Our `pdu_leaves_replace` only handles single event ID |
 
 ## Implementation details
 
-1. **Room leaves multi-id** — Add ability to update room leaves with multiple eventIds
-2. **Database rooms refactor** — Cleaner room leaves handling
+This commit changes the `replace_pdu_leaves` function to accept multiple event IDs instead of a single event ID:
+
+1. **`replace_pdu_leaves` now accepts `&[EventId]`** instead of a single `&EventId`
+2. **Clears all existing leaves** for the room, then adds each event ID as a new leaf
+3. **Enables multiple `prev_events`** — A PDU can now reference multiple previous events
+4. **Updated `append_pdu`** to pass the leaves array
+
+**In our C++ implementation:** Our `pdu_leaves_replace` in data.cpp only clears and adds a single event ID. We would need to update it to accept multiple event IDs.
+
+**Status:** Partially implemented — our `pdu_leaves_replace` only handles single event ID
 
 ## Smoke test
 

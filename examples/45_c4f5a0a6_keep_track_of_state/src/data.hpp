@@ -90,6 +90,12 @@ class Data {
       const std::string& room_id);
   // NEW in d73c6aa8: get the StateHash of a specific PDU.
   std::optional<std::string> pdu_statehash(const std::string& pdu_id) const;
+  // NEW in c4f5a0a6: build a StateMap by iterating over all keys that start
+  // with state_hash, this gives the full state at event "x".
+  std::vector<std::pair<std::string, std::string>> get_statemap_by_hash(
+      const std::string& state_hash) const;
+  // NEW in c4f5a0a6: fetch the previous StateHash ID to current.
+  std::optional<std::string> prev_state_hash(const std::string& current) const;
   std::vector<std::string> pdus_all() const;
   /// NEW in 23cb550d: backwards pagination — PDUs of a room older than `until`.
   std::vector<std::string> pdus_until(const std::string& room_id,

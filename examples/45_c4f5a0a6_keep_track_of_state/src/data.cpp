@@ -656,6 +656,10 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
     state_key.push_back(static_cast<char>(0xff));
     state_key += event.value("state_key", "");
     db_.roomstateid_pdu.insert(state_key, pdu_json);
+
+    // NEW in c4f5a0a6: generate new StateHash and update state trees
+    append_state_pdu(room_id, pdu_id, event.value("state_key", ""),
+                     event.value("type", ""));
   }
 
   // b6c0e9bf: membership tree updates happen here, post-authorization.
@@ -708,20 +712,12 @@ std::string Data::append_state_pdu(const std::string& room_id,
 // NEW in c4f5a0a6: compute a new StateHash. If the room has no events,
 // returns the SHA-256 of the room_id (representing "empty state").
 std::string Data::new_state_hash_id(const std::string& room_id) {
+  // Use current_state_pduids to get all state PDU ids efficiently
+  auto state_pairs = current_state_pduids(room_id);
   std::vector<std::string> pdu_ids;
-  // Scan roomstateid_pdu for current state PDUs
-  for (const auto& [key, value] : db_.roomstateid_pdu.iter_all()) {
-    // The key starts with 'd' + room_id + 0xff
-    std::string prefix;
-    prefix.push_back('d');
-    prefix += room_id;
-    prefix.push_back(static_cast<char>(0xff));
-    if (key.rfind(prefix, 0) == 0) {
-      auto ev = nlohmann::json::parse(value, nullptr, false);
-      if (!ev.is_discarded() && ev.contains("event_id")) {
-        pdu_ids.push_back(ev["event_id"].get<std::string>());
-      }
-    }
+  pdu_ids.reserve(state_pairs.size());
+  for (const auto& [state_key, pdu_id] : state_pairs) {
+    pdu_ids.push_back(pdu_id);
   }
   if (pdu_ids.empty()) {
     // No state yet — hash the room_id itself
@@ -759,6 +755,45 @@ std::optional<std::string> Data::pdu_statehash(const std::string& pdu_id) const 
   auto v = db_.pduid_statehash.get(pdu_id);
   if (!v) return std::nullopt;
   return *v;
+}
+
+// NEW in c4f5a0a6: build a StateMap by iterating over all keys that start
+// with state_hash, this gives the full state at event "x".
+std::vector<std::pair<std::string, std::string>> Data::get_statemap_by_hash(
+    const std::string& state_hash) const {
+  std::vector<std::pair<std::string, std::string>> result;
+  for (const auto& [key, value] : db_.stateid_pduid.scan_prefix(state_hash)) {
+    // Key format: state_hash + 0xff + event_type + 0xff + state_key
+    // We need to extract event_type and state_key
+    std::string rest = key.substr(state_hash.size() + 1);
+    auto sep1 = rest.find(static_cast<char>(0xff));
+    if (sep1 != std::string::npos) {
+      std::string event_type = rest.substr(0, sep1);
+      std::string state_key = rest.substr(sep1 + 1);
+      auto ev = nlohmann::json::parse(value, nullptr, false);
+      if (!ev.is_discarded() && ev.contains("event_id")) {
+        result.push_back({event_type + static_cast<char>(0xff) + state_key,
+                          ev["event_id"].get<std::string>()});
+      }
+    }
+  }
+  return result;
+}
+
+// NEW in c4f5a0a6: fetch the previous StateHash ID to current.
+// Walks back through the pduid_statehash chain.
+std::optional<std::string> Data::prev_state_hash(
+    const std::string& current) const {
+  bool found = false;
+  for (const auto& [key, value] : db_.pduid_statehash.iter_all()) {
+    std::string prev = value;
+    if (current == prev) {
+      found = true;
+    } else if (found && current != prev) {
+      return prev;
+    }
+  }
+  return std::nullopt;
 }
 
 std::vector<std::string> Data::pdus_all() const {
@@ -942,6 +977,7 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   pdu_append(event_id, room_id, std::move(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {

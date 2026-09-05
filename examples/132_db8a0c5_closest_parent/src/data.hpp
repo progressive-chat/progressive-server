@@ -20,6 +20,15 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <map>
+#include <variant>
+
+struct ClosestParentAppend {};
+struct ClosestParentInsert {
+    uint64_t count;
+};
+
+using ClosestParent = std::variant<ClosestParentAppend, ClosestParentInsert>;
 
 class Data {
  public:
@@ -74,6 +83,13 @@ class Data {
   void redact_pdu(const std::string& event_id);
   std::vector<std::string> pdu_leaves_replace(const std::string& room_id,
                                               const std::string& event_id);
+  /// NEW in db8a0c5: find the closest parent PDU for event ordering in /send
+  /// Returns Append if the last event is in prev_events, Insert(count) if a common ancestor is found,
+  /// or nullopt if no common ancestor found.
+  std::optional<std::variant<ClosestParentAppend, ClosestParentInsert>> get_closest_parent(
+      const std::string& room_id,
+      const std::vector<std::string>& incoming_prev_ids,
+      const std::map<std::string, std::string>& their_state) const;
   /// b6c0e9bf: returns false (and stores nothing) when unauthorized.
   bool pdu_append(const std::string& event_id, const std::string& room_id,
                   nlohmann::json event);
@@ -103,6 +119,10 @@ class Data {
   /// NEW in f7816b11d: participating servers of a room (federation).
   void add_room_server(const std::string& room_id, const std::string& server);
   std::vector<std::string> room_servers(const std::string& room_id) const;
+
+  // --- NEW in db8a0c5: helper methods for PDU lookup -----------------------
+  std::optional<std::string> get_pdu_id(const std::string& event_id) const;
+  uint64_t pdu_count(const std::string& pdu_id) const;
 
   // --- NEW in 12a8c9ba: federation (server-side PDU serving) -----------------
   /// Current full state of a room as a list of PDU JSON objects.

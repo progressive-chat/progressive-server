@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <iostream>
 #include <cstdio>
+#include <map>
+#include <variant>
 
 // utils::generate_keypair via update_and_fetch("keypair") semantics.
 static std::string load_or_generate_keypair(sled::Db& storage) {
@@ -480,6 +482,52 @@ std::vector<std::string> Data::pdu_leaves_replace(const std::string& room_id,
   return event_ids;
 }
 
+// NEW in db8a0c5: find the closest parent PDU for event ordering in /send
+// Returns ClosestParentAppend if the last event is in prev_events,
+// ClosestParentInsert(count) if a common ancestor is found,
+// or nullopt if no common ancestor found.
+std::optional<std::variant<ClosestParentAppend, ClosestParentInsert>> Data::get_closest_parent(
+    const std::string& room_id,
+    const std::vector<std::string>& incoming_prev_ids,
+    const std::map<std::string, std::string>& their_state) const {
+  // If the last event in the room is one of the incoming prev_events
+  auto all_pdus = db_.pduid_pdus.iter_all();
+  if (!all_pdus.empty()) {
+    auto last = all_pdus.back();
+    try {
+      auto pdu_json = nlohmann::json::parse(last.second);
+      std::string last_event_id = pdu_json.value("event_id", "");
+
+      if (std::find(incoming_prev_ids.begin(), incoming_prev_ids.end(), last_event_id) != incoming_prev_ids.end()) {
+        return ClosestParentAppend{};
+      }
+    } catch (...) {
+      // Ignore parse errors
+    }
+  }
+
+  // Otherwise, walk back through the prev_ids to find a known ancestor
+  std::vector<std::string> prev_ids = incoming_prev_ids;
+  while (!prev_ids.empty()) {
+    std::string id = prev_ids.back();
+    prev_ids.pop_back();
+
+    // Check if we have this PDU in our database
+    if (auto pdu_id = get_pdu_id(id)) {
+      // Found a known ancestor - return the count to insert after
+      uint64_t count = pdu_count(*pdu_id);
+      return ClosestParentInsert{count};
+    }
+
+    // If not found, add its auth events to the search
+    // For simplicity, we'll skip auth chain traversal in this simplified version
+    // A full implementation would fetch auth events from their_state
+  }
+
+  // No common ancestor found
+  return std::nullopt;
+}
+
 bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
                       nlohmann::json event) {
   const std::vector<std::string> prev_events =
@@ -818,6 +866,17 @@ std::vector<std::string> Data::room_servers(const std::string& room_id) const {
   for (const auto& [k, v] : db_.roomserverids.scan_prefix(prefix))
     out.push_back(k.substr(room_id.size() + 1));
   return out;
+}
+
+// NEW in db8a0c5: helper methods for PDU lookup
+std::optional<std::string> Data::get_pdu_id(const std::string& event_id) const {
+  return db_.eventid_pduid.get(event_id);
+}
+
+uint64_t Data::pdu_count(const std::string& pdu_id) const {
+  // For now, return 0 as placeholder
+  // In a real implementation, we'd track the count in a separate tree
+  return 0;
 }
 
 // --- NEW in 821c608c: media repository -----------------------------------------

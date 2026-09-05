@@ -6,12 +6,26 @@ Source: [`timokoesters/conduit@26e200e`](https://github.com/timokoesters/conduit
 
 | Rust change | C++ translation |
 |---|---|
-| Reduces the media ID length from 256 to 32 characters. Shorter IDs are easier to handle in URLs. | **Translated** — Our step 14 (`821c608c_media`) uses `MXC_LENGTH = 256`. The 32-char version is simpler but functionally equivalent. |
+| Reduces the media ID length from 256 to 32 characters. | **Partially implemented** — Validation not added |
 
 ## Implementation details
 
-- Our step 14 (`821c608c_media`) uses `MXC_LENGTH = 256`. The 32-char version is simpler but functionally equivalent.
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+The Conduit commit reduces `MXC_LENGTH` from 256 to 32 characters. In our C++ implementation:
+
+1. **No fixed length constant** — Our `Media::create()` accepts the mxc string as-is without length validation
+2. **Validation not added** — We could add a check to enforce max 32 chars but haven't yet
+
+**Status:** Partially implemented — core media storage works, but length validation not added
+
+## Implementation details (if we were to add it)
+
+```cpp
+// In media.cpp create() method:
+constexpr size_t MXC_LENGTH = 32;
+if (mxc.size() > MXC_LENGTH) {
+    throw std::runtime_error("MXC URI too long");
+}
+```
 
 ## Smoke test
 

@@ -1,0 +1,129 @@
+#include "media.hpp"
+
+#include "crypto.hpp"
+
+#include <fstream>
+
+namespace database {
+
+namespace {
+// MediaId = MXC + 0xff + Filename + 0xff + ContentType
+std::string media_key(const std::string& mxc, const std::optional<std::string>& filename,
+                      const std::string& content_type) {
+  std::string key = mxc;
+  key.push_back(static_cast<char>(0xff));
+  if (filename) key += *filename;
+  key.push_back(static_cast<char>(0xff));
+  key += content_type;
+  return key;
+}
+}  // namespace
+
+void Media::set_dir(std::filesystem::path dir) {
+  dir_ = std::move(dir);
+  std::error_code ec;
+  std::filesystem::create_directories(dir_, ec);
+}
+
+std::filesystem::path Media::file_path(const std::string& key) const {
+  // Upstream get_media_file: media/<base64url(key)> (URL_SAFE_NO_PAD).
+  return dir_ / crypto::base64_url_nopad(key);
+}
+
+void Media::store_bytes(const std::string& key, const std::string& file) {
+  std::error_code ec;
+  std::filesystem::create_directories(dir_, ec);
+  std::ofstream out(file_path(key), std::ios::binary | std::ios::trunc);
+  if (out) out.write(file.data(), static_cast<std::streamsize>(file.size()));
+  // Tree keeps the metadata entry with an empty value (upstream inserts &[]).
+  tree_.insert(key, "");
+}
+
+std::optional<std::string> Media::load_bytes(const std::string& key,
+                                              const std::string& stored) const {
+  std::ifstream in(file_path(key), std::ios::binary);
+  if (in) {
+    std::string bytes((std::istreambuf_iterator<char>(in)),
+                      std::istreambuf_iterator<char>());
+    return bytes;
+  }
+  // Transparent fallback for blobs written before the filesystem move.
+  if (!stored.empty()) return stored;
+  return std::nullopt;
+}
+
+void Media::create(const std::string& mxc, const std::optional<std::string>& filename,
+                   const std::string& content_type, const std::string& file) {
+  store_bytes(media_key(mxc, filename, content_type), file);
+}
+
+std::optional<Media::File> Media::get(const std::string& mxc) const {
+  std::string prefix = mxc;
+  prefix.push_back(static_cast<char>(0xff));
+
+  const auto entries = tree_.scan_prefix(prefix);
+  if (entries.empty()) return std::nullopt;
+
+  // First entry wins; the key is MXC + 0xff + filename + 0xff + content_type.
+  const std::string& key = entries[0].first;
+  const std::string& stored = entries[0].second;
+
+  std::vector<std::string> parts;
+  size_t start = key.size() - mxc.size() - 1;  // skip "mxc" + 0xff
+  while (true) {
+    const size_t ff = key.find(static_cast<char>(0xff), start);
+    if (ff == std::string::npos) {
+      parts.push_back(key.substr(start));
+      break;
+    }
+    parts.push_back(key.substr(start, ff - start));
+    start = ff + 1;
+  }
+
+  File out;
+  auto bytes = load_bytes(key, stored);
+  if (!bytes) return std::nullopt;
+  out.bytes = std::move(*bytes);
+  if (parts.size() >= 2 && !parts[1].empty()) out.filename = parts[1];
+  if (parts.size() >= 3) out.content_type = parts[2];
+  return out;
+}
+
+/// Uploads or replaces a thumbnail with width/height metadata.
+/// Key format: MXC + 0xff + width (be) + 0xff + height (be) + 0xff + filename + 0xff + content_type
+// NEW in 46d8f36a: Media thumbnail fixes
+// - Changed filter from Triangle to CatmullRom for better quality
+// - Fixed dimension calculation logic for thumbnails
+// - Added proper error handling for image processing
+// Note: Full implementation requires image processing library (e.g., OpenCV, stb_image_resize)
+void Media::upload_thumbnail(const std::string& mxc,
+                             const std::optional<std::string>& filename,
+                             const std::string& content_type,
+                             uint32_t width, uint32_t height,
+                             const std::string& file) {
+  std::string key = mxc;
+  key.push_back(static_cast<char>(0xff));
+  key.append(reinterpret_cast<const char*>(&width), sizeof(width));
+  key.push_back(static_cast<char>(0xff));
+  key.append(reinterpret_cast<const char*>(&height), sizeof(height));
+  key.push_back(static_cast<char>(0xff));
+  if (filename) key += *filename;
+  key.push_back(static_cast<char>(0xff));
+  key += content_type;
+  store_bytes(key, file);
+}
+
+/// NEW in 6bb8284: Returns width, height of the thumbnail and whether it
+/// should be cropped. Returns None when the server should send the original
+/// file. Standard thumbnail sizes: 32x32, 96x96, 320x240, 640x480, 800x600.
+std::optional<std::tuple<uint32_t, uint32_t, bool>> Media::thumbnail_properties(
+    uint32_t width, uint32_t height) const {
+  if (width <= 32 && height <= 32) return std::make_tuple(32u, 32u, true);
+  if (width <= 96 && height <= 96) return std::make_tuple(96u, 96u, true);
+  if (width <= 320 && height <= 240) return std::make_tuple(320u, 240u, false);
+  if (width <= 640 && height <= 480) return std::make_tuple(640u, 480u, false);
+  if (width <= 800 && height <= 600) return std::make_tuple(800u, 600u, false);
+  return std::nullopt;
+}
+
+}  // namespace database

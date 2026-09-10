@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(conduit_30_1f292c09_federation_send LANGUAGES C CXX)
+project(conduit_127_8f27e61_read_receipts_federation LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -44,8 +44,6 @@ else()
   set(ROCKSDB_TARGET RocksDB::rocksdb)
 endif()
 
-# rust `argon2` crate -> libargon2 (P-H-C reference implementation),
-# compiled in directly (the 20190702 tag ships no CMake library target).
 FetchContent_Declare(argon2
   GIT_REPOSITORY https://github.com/P-H-C/phc-winner-argon2.git
   GIT_TAG 20190702
@@ -67,6 +65,7 @@ add_library(conduit_core STATIC
   src/handlers.cpp
   src/uiaa.cpp
   src/server_server.cpp
+  src/appservice_server.cpp
   ${ARGON2_SRC_DIR}/src/argon2.c
   ${ARGON2_SRC_DIR}/src/core.c
   ${ARGON2_SRC_DIR}/src/encoding.c
@@ -80,6 +79,9 @@ add_library(conduit_core STATIC
   src/database.cpp
   src/crypto.cpp
   src/media.cpp
+  src/state_res.cpp
+  src/push_rules.cpp
+  src/proxy.cpp
 )
 target_compile_definitions(conduit_core PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(conduit_core PUBLIC

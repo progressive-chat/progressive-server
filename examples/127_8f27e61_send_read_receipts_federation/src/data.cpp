@@ -1,6 +1,7 @@
 #include "data.hpp"
 
 #include "crypto.hpp"
+#include "push_rules.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
@@ -52,15 +53,34 @@ static std::string load_or_generate_keypair(sled::Db& storage) {
   return seed;
 }
 
-Data::Data(const std::filesystem::path& dir, uint64_t cache_capacity)
-    : db_storage_(sled::Db::open(dir)), db_(database::Database::open(&db_storage_)) {
-  (void)cache_capacity;  // TODO: implement cache capacity configuration for RocksDB
+Data::Data(const std::filesystem::path& dir, double db_cache_capacity_mb)
+    : db_storage_(sled::Db::open(dir, db_cache_capacity_mb)),
+      db_(database::Database::open(&db_storage_)) {
   hostname_ = db_storage_.get_root("hostname").value_or("localhost");
   keypair_ = load_or_generate_keypair(db_storage_);
+  // NEW in 972caacd: media blobs live in <data_dir>/media/ files.
+  db_.media.set_dir(dir / "media");
+
+  // MIGRATION 0 -> 1 (8f27e61): build the server->room index from the
+  // existing room->server index. Upstream versions this via a `version` key
+  // in globals; the port keeps the version in the database root.
+  if (!db_storage_.get_root("version").has_value()) {
+    for (const auto& [key, _] : db_.roomserverids.iter_all()) {
+      // Key format: "r" + room_id + 0xff + server_name
+      if (key.size() < 2 || key[0] != 'r') continue;
+      const size_t sep = key.find('\xff', 1);
+      if (sep == std::string::npos || sep + 1 >= key.size()) continue;
+      const std::string room_id = key.substr(1, sep - 1);
+      const std::string server = key.substr(sep + 1);
+      db_.serverroomids.insert(server + '\xff' + room_id, "");
+    }
+    db_storage_.insert_root("version", std::string("\0\0\0\0\0\0\0\1", 8));
+  }
 }
 
-Data Data::load_or_create(const std::filesystem::path& dir, uint64_t cache_capacity) {
-  return Data(dir, cache_capacity);
+Data Data::load_or_create(const std::filesystem::path& dir,
+                           double db_cache_capacity_mb) {
+  return Data(dir, db_cache_capacity_mb);
 }
 
 void Data::set_hostname(const std::string& hostname) {
@@ -160,6 +180,8 @@ bool Data::displayname_set(const std::string& user_id,
   db_.userid_displayname.insert(user_id, displayname);
 
   // Broadcast the rename: a fresh m.room.member join event per joined room.
+  // NEW in 58463bba: per-room failures no longer abort the broadcast
+  // (upstream `let _ =` / filter_map-ok style).
   for (const auto& room_id : rooms_joined(user_id)) {
     nlohmann::json event = {
         {"type", "m.room.member"},
@@ -172,9 +194,11 @@ bool Data::displayname_set(const std::string& user_id,
         {"state_key", user_id},
         {"unsigned", nlohmann::json::object()},
     };
-    const std::string event_id = crypto::reference_hash(event);
-    event["event_id"] = event_id;
-    return pdu_append(event_id, room_id, std::move(event));
+    try {
+      const std::string event_id = crypto::reference_hash(event);
+      event["event_id"] = event_id;
+      (void)pdu_append(event_id, room_id, std::move(event));
+    } catch (...) {}
   }
   return true;
 }
@@ -188,7 +212,11 @@ void Data::device_add(const std::string& user_id, const std::string& device_id) 
   for (const auto& [k, v] : db_.userid_deviceids.get_iter(user_id)) {
     if (v == device_id) already = true;
   }
-  if (!already) db_.userid_deviceids.add(user_id, device_id);
+  if (!already) {
+    db_.userid_deviceids.add(user_id, device_id);
+    // NEW in 71ed1b29: bump devicelist version on device add.
+    db_.userid_devicelistversion.update_and_fetch(user_id, utils::increment);
+  }
 }
 
 void Data::token_replace(const std::string& user_id, const std::string& device_id,
@@ -251,6 +279,155 @@ std::vector<std::string> Data::rooms_joined(const std::string& user_id) const {
   return rooms;
 }
 
+// NEW in 2479389: rooms both users have joined (upstream get_shared_rooms).
+std::vector<std::string> Data::shared_rooms(const std::string& user_a,
+                                            const std::string& user_b) const {
+  std::vector<std::string> shared;
+  const auto rooms_b = rooms_joined(user_b);
+  for (const auto& room_id : rooms_joined(user_a)) {
+    if (std::find(rooms_b.begin(), rooms_b.end(), room_id) != rooms_b.end())
+      shared.push_back(room_id);
+  }
+  return shared;
+}
+
+// NEW in 2479389: presence storage (simplified to the latest event).
+void Data::update_presence(const std::string& user_id, const std::string& room_id,
+                           const nlohmann::json& presence) {
+  db_.userroomid_presence.insert(user_id + '\xff' + room_id, presence.dump());
+}
+
+std::optional<nlohmann::json> Data::get_last_presence_event(
+    const std::string& user_id, const std::string& room_id) const {
+  auto raw = db_.userroomid_presence.get(user_id + '\xff' + room_id);
+  if (!raw) return std::nullopt;
+  try {
+    return nlohmann::json::parse(*raw);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+// NEW in 8f27e61: read receipts (upstream readreceiptid_readreceipt keyed by
+// room + count + user; the count comes from a global monotonic counter so
+// `since` comparisons work across rooms for EDU selection).
+namespace {
+std::string u64_to_be_bytes(uint64_t v) {
+  std::string out(8, '\0');
+  for (int i = 7; i >= 0; --i) {
+    out[static_cast<size_t>(i)] = static_cast<char>(v & 0xff);
+    v >>= 8;
+  }
+  return out;
+}
+}  // namespace
+
+void Data::readreceipt_update(const std::string& user_id, const std::string& room_id,
+                              const nlohmann::json& event) {
+  const std::string prefix = room_id + '\xff';
+  // Remove the previous receipt of this user in this room.
+  for (const auto& [key, _] : db_.readreceiptid_readreceipt.scan_prefix(prefix)) {
+    if (key.size() > prefix.size() + 9 &&
+        key.substr(prefix.size() + 9) == user_id) {
+      db_.readreceiptid_readreceipt.erase(key);
+    }
+  }
+  const std::string counter_key = std::string(1, '\xff') + "receipt_count";
+  const std::string count_bytes =
+      db_.readreceiptid_readreceipt.update_and_fetch(counter_key, utils::increment);
+  const uint64_t count = utils::u64_from_bytes(count_bytes);
+
+  std::string key = prefix + u64_to_be_bytes(count);
+  key.push_back('\xff');
+  key += user_id;
+  db_.readreceiptid_readreceipt.insert(key, event.dump());
+}
+
+std::vector<Data::Receipt> Data::readreceipts_since(const std::string& room_id,
+                                                    uint64_t since) const {
+  std::vector<Receipt> out;
+  const std::string prefix = room_id + '\xff';
+  for (const auto& [key, value] : db_.readreceiptid_readreceipt.scan_prefix(prefix)) {
+    if (key.size() < prefix.size() + 9) continue;
+    const uint64_t count = utils::u64_from_bytes(key.substr(prefix.size(), 8));
+    if (count <= since) continue;
+    Receipt r;
+    r.count = count;
+    r.user_id = key.substr(prefix.size() + 9);
+    try {
+      r.event = nlohmann::json::parse(value);
+    } catch (...) {
+      continue;
+    }
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+
+// NEW in 8f27e61: all rooms a server participates in.
+std::vector<std::string> Data::server_rooms(const std::string& server) const {
+  std::vector<std::string> rooms;
+  const std::string prefix = server + '\xff';
+  for (const auto& [key, _] : db_.serverroomids.scan_prefix(prefix)) {
+    rooms.push_back(key.substr(prefix.size()));
+  }
+  return rooms;
+}
+
+// NEW in 8f27e61: pick the m.receipt EDUs to send to `server` (up to 20),
+// skipping receipts of remote users; advances the stored EDU count.
+std::vector<nlohmann::json> Data::select_edus(const std::string& server) {
+  uint64_t since = 0;
+  if (auto bytes = db_.servername_educount.get(server)) {
+    try {
+      since = utils::u64_from_bytes(*bytes);
+    } catch (...) {
+    }
+  }
+  std::vector<nlohmann::json> events;
+  uint64_t max_count = since;
+  bool done = false;
+  for (const auto& room_id : server_rooms(server)) {
+    for (const auto& receipt : readreceipts_since(room_id, since)) {
+      if (receipt.count > max_count) max_count = receipt.count;
+      // Only our own users' receipts are forwarded.
+      const std::string user_server = receipt.user_id.find(':') == std::string::npos
+                                          ? std::string()
+                                          : receipt.user_id.substr(receipt.user_id.find(':') + 1);
+      if (user_server != hostname_) continue;
+
+      const auto& content = receipt.event.value("content", nlohmann::json::object());
+      std::string event_id;
+      nlohmann::json data;
+      for (auto it = content.begin(); it != content.end(); ++it) {
+        event_id = it.key();
+        if (it.value().is_object() && it.value().contains("m.read") &&
+            it.value()["m.read"].contains(receipt.user_id))
+          data = it.value()["m.read"][receipt.user_id];
+        break;  // one event per read receipt
+      }
+      if (event_id.empty() || data.is_null()) continue;
+
+      nlohmann::json entry = {
+          {"data", data},
+          {"event_ids", nlohmann::json::array({event_id})},
+      };
+      nlohmann::json edu = {
+          {"edu_type", "m.receipt"},
+          {"content", {{"receipts", {{room_id, {{"read", {{receipt.user_id, entry}}}}}}}}},
+      };
+      events.push_back(std::move(edu));
+      if (events.size() >= 20) {
+        done = true;
+        break;
+      }
+    }
+    if (done) break;
+  }
+  db_.servername_educount.insert(server, u64_to_be_bytes(max_count));
+  return events;
+}
+
 bool Data::room_leave(const std::string& room_id, const std::string& user_id) {
   // Remove membership entries (inverse lookups via remove_value).
   for (const auto& [k, v] : db_.roomid_userids.get_iter(room_id))
@@ -295,6 +472,8 @@ void Data::remove_device(const std::string& user_id, const std::string& device_i
   for (const auto& d : devices) {} // list rebuilt below
   db_.userid_deviceids.clear(user_id);
   for (const auto& d : devices) db_.userid_deviceids.add(user_id, d);
+  // NEW in 71ed1b29: bump devicelist version on device remove.
+  db_.userid_devicelistversion.update_and_fetch(user_id, utils::increment);
 }
 
 bool Data::remove_device_by_token(const std::string& token) {
@@ -310,6 +489,8 @@ bool Data::remove_device_by_token(const std::string& token) {
       db_.token_userid.erase(token);
       // Remove the device from the user's device list
       db_.userid_deviceids.remove_value(*user_id, device_id);
+      // NEW in 71ed1b29: bump devicelist version on device remove.
+      db_.userid_devicelistversion.update_and_fetch(*user_id, utils::increment);
       return true;
     }
   }
@@ -340,20 +521,82 @@ std::optional<std::string> Data::membership_of(const std::string& room_id,
   return nlohmann::json::parse(*text)["content"].value("membership", "leave");
 }
 
+// NEW in 7fa54e44: single source for default power levels (previously
+// hardcoded in two places, both missing events:{}/notifications:{room:50}).
+nlohmann::json Data::default_power_levels(const std::string& creator) {
+  nlohmann::json users = nlohmann::json::object();
+  if (!creator.empty()) users[creator] = 100;
+  return nlohmann::json{{"ban", 50},
+                        {"events", nlohmann::json::object()},
+                        {"events_default", 0},
+                        {"invite", 50},
+                        {"kick", 50},
+                        {"redact", 50},
+                        {"state_default", 50},
+                        {"users", std::move(users)},
+                        {"users_default", 0},
+                        {"notifications", {{"room", 50}}}};
+}
+
 void Data::update_membership(const std::string& room_id,
                              const std::string& user_id,
-                             const std::string& membership) {
+                             const std::string& membership,
+                             const std::optional<nlohmann::json>& invite_state) {
+  const std::string userroom = user_id + '\xff' + room_id;
+  const std::string roomuser = room_id + '\xff' + user_id;
+  // NEW in 8f27e61: keep the server<->room indexes in sync with membership
+  // (the port previously never populated roomserverids at all).
+  const std::string user_server = user_id.find(':') == std::string::npos
+                                      ? std::string()
+                                      : user_id.substr(user_id.find(':') + 1);
+  const std::string roomserver = "r" + room_id + '\xff' + user_server;
+  const std::string serverroom = user_server + '\xff' + room_id;
   if (membership == "join") {
     bool already = is_joined(user_id, room_id);
     if (!already) db_.roomid_userids.add(room_id, user_id);
     db_.userid_inviteroomids.remove_value(user_id, room_id);
+    // NEW in 8773e501: joining clears invite state + count.
+    db_.userroomid_invitestate.erase(userroom);
+    db_.roomuserid_invitecount.erase(roomuser);
+    // NEW in 8f27e61: the server participates in this room now.
+    db_.roomserverids.insert(roomserver, "");
+    db_.serverroomids.insert(serverroom, "");
   } else if (membership == "invite") {
     db_.userid_inviteroomids.add(user_id, room_id);
+    // NEW in 8773e501: store invite_state + bump invite count.
+    nlohmann::json state = invite_state.value_or(nlohmann::json::array());
+    if (!state.is_array()) state = nlohmann::json::array();
+    db_.userroomid_invitestate.insert(userroom, state.dump());
+    const std::string count_bytes =
+        db_.roomuserid_invitecount.update_and_fetch("n" + roomuser, utils::increment);
+    db_.roomuserid_invitecount.insert(roomuser, count_bytes);
+    // NEW in 8f27e61: invited users' servers participate in the room too.
+    db_.roomserverids.insert(roomserver, "");
+    db_.serverroomids.insert(serverroom, "");
   } else {  // leave / ban
     db_.userid_leftroomids.add(user_id, room_id);
     db_.userid_inviteroomids.remove_value(user_id, room_id);
     db_.roomid_userids.remove_value(room_id, user_id);
     db_.userid_roomids.remove_value(user_id, room_id);
+    // NEW in 8773e501: leaving clears invite state + count.
+    db_.userroomid_invitestate.erase(userroom);
+    db_.roomuserid_invitecount.erase(roomuser);
+    // NEW in 8f27e61: drop the server when its last user leaves the room.
+    bool other_from_server = false;
+    for (const auto& [k, v] : db_.roomid_userids.get_iter(room_id)) {
+      if (v == user_id) continue;
+      const std::string s = v.find(':') == std::string::npos
+                                ? std::string()
+                                : v.substr(v.find(':') + 1);
+      if (s == user_server) {
+        other_from_server = true;
+        break;
+      }
+    }
+    if (!other_from_server) {
+      db_.roomserverids.erase(roomserver);
+      db_.serverroomids.erase(serverroom);
+    }
   }
 }
 
@@ -369,6 +612,17 @@ std::vector<std::string> Data::all_device_ids(const std::string& user_id) const 
   std::vector<std::string> out;
   for (const auto& [k, v] : db_.userid_deviceids.get_iter(user_id)) out.push_back(v);
   return out;
+}
+
+// NEW in 71ed1b29: devicelist version for federation /user/devices stream_id.
+std::optional<uint64_t> Data::get_devicelist_version(const std::string& user_id) const {
+  auto v = db_.userid_devicelistversion.get(user_id);
+  if (!v) return std::nullopt;
+  try {
+    return utils::u64_from_bytes(*v);
+  } catch (...) {
+    return std::nullopt;
+  }
 }
 
 
@@ -469,17 +723,60 @@ std::vector<std::string> Data::public_rooms() const {
   return out;
 }
 
+// NEW in 3c3062a3: directory chunk from targeted state lookups instead of a
+// full room-state scan per room (removes upstream's "TODO: Do not load full
+// state?"). Visibility fields come from their state events instead of
+// hardcoded values.
+nlohmann::json Data::public_room_chunk(const std::string& room_id) const {
+  nlohmann::json chunk;
+  chunk["room_id"] = room_id;
+  chunk["num_joined_members"] = room_users(room_id);
+  if (auto v = room_state_get(room_id, "m.room.canonical_alias", "")) {
+    if (v->contains("alias") && (*v)["alias"].is_string())
+      chunk["canonical_alias"] = (*v)["alias"];
+  }
+  if (auto v = room_state_get(room_id, "m.room.name", "")) {
+    std::string name = v->value("name", "");
+    if (!name.empty()) chunk["name"] = name;
+  }
+  if (auto v = room_state_get(room_id, "m.room.topic", "")) {
+    std::string topic = v->value("topic", "");
+    if (!topic.empty()) chunk["topic"] = topic;
+  }
+  bool world_readable = false;
+  if (auto v = room_state_get(room_id, "m.room.history_visibility", ""))
+    world_readable = (v->value("history_visibility", "") == "world_readable");
+  chunk["world_readable"] = world_readable;
+  bool guest_can_join = false;
+  if (auto v = room_state_get(room_id, "m.room.guest_access", ""))
+    guest_can_join = (v->value("guest_access", "") == "can_join");
+  chunk["guest_can_join"] = guest_can_join;
+  if (auto v = room_state_get(room_id, "m.room.avatar", "")) {
+    std::string url = v->value("url", "");
+    if (!url.empty()) chunk["avatar_url"] = url;
+  }
+  return chunk;
+}
+
 // --- PDU graph ------------------------------------------------------------------
 
 std::optional<std::string> Data::pdu_get(const std::string& event_id) const {
+  if (auto cached = db_.pdu_cache.get(event_id)) {
+    return cached;
+  }
   const auto pdu_id = db_.eventid_pduid.get(event_id);
   if (!pdu_id) return std::nullopt;
-  return db_.pduid_pdus.get(*pdu_id);
+  auto pdu = db_.pduid_pdus.get(*pdu_id);
+  if (pdu) {
+    db_.pdu_cache.put(event_id, *pdu);
+  }
+  return pdu;
 }
 
 // NEW in 18bf6774: replace a PDU with the redacted form (rooms.rs
 // redact_pdu). The event JSON is rewritten in place via eventid_pduid lookup.
-void Data::redact_pdu(const std::string& event_id) {
+void Data::redact_pdu(const std::string& event_id,
+                       const std::optional<nlohmann::json>& redaction_event) {
   const auto pdu_id = db_.eventid_pduid.get(event_id);
   if (!pdu_id) return;
 
@@ -487,6 +784,10 @@ void Data::redact_pdu(const std::string& event_id) {
 
   // PduEvent::redact(): clear unsigned, strip content per event type.
   pdu["unsigned"] = nlohmann::json::object();
+  // NEW in ddcf1a71: redacted_because is the redaction event object itself,
+  // never a JSON-encoded string.
+  if (redaction_event && redaction_event->is_object())
+    pdu["unsigned"]["redacted_because"] = *redaction_event;
   static const std::map<std::string, std::vector<std::string>> kAllowed = {
       {"m.room.member", {"membership"}},
       {"m.room.create", {"creator"}},
@@ -519,11 +820,24 @@ std::vector<std::string> Data::pdu_leaves_replace(const std::string& room_id,
   return event_ids;
 }
 
+// NEW in 58463bba: read-only leaves for the outgoing invite PDU.
+std::vector<std::string> Data::pdu_leaves(const std::string& room_id) const {
+  std::vector<std::string> event_ids;
+  for (const auto& [key, value] : db_.roomid_pduleaves.get_iter(room_id)) {
+    event_ids.push_back(value);
+  }
+  return event_ids;
+}
+
 bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
                       nlohmann::json event, uint64_t count,
                       const std::string& pdu_id_in) {
-  const std::vector<std::string> prev_events =
+  std::vector<std::string> prev_events =
       pdu_leaves_replace(room_id, event_id);
+  // NEW in a77fcd1: limit prev_events to 20
+  if (prev_events.size() > 20) {
+    prev_events.resize(20);
+  }
 
   // --- NEW in b6c0e9bf: state-event access control ---------------------------
   const std::string sender = event.value("sender", "");
@@ -547,11 +861,8 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
   long sender_power_val = 0;
 
   if (has_state_key) {
-    json pl = {
-        {"ban", 50}, {"events_default", 0}, {"invite", 50},
-        {"kick", 50}, {"redact", 50}, {"state_default", 0},
-        {"users", json::object()}, {"users_default", 0},
-    };
+    // NEW in 7fa54e44: shared defaults (were hardcoded here).
+    json pl = Data::default_power_levels("");
     if (auto pl_ev = get_state("m.room.power_levels", ""))
       pl = pl_ev->value("content", pl);
 
@@ -706,12 +1017,83 @@ bool Data::pdu_append(const std::string& event_id, const std::string& room_id,
     state_key.push_back(static_cast<char>(0xff));
     state_key += event.value("state_key", "");
     db_.roomstateid_pdu.insert(state_key, pdu_json);
+
+    // NEW in e50f2864: save state for send_join pdu
+    // We set the room state after inserting the pdu, so that we never have a moment in time
+    // where events in the current room state do not exist
+    if (auto state_hash = append_to_state(room_id, event)) {
+      set_room_state(room_id, *state_hash);
+    }
   }
 
   // b6c0e9bf: membership tree updates happen here, post-authorization.
   if (event.value("type", "") == "m.room.member") {
     update_membership(room_id, event.value("state_key", ""),
                       event["content"].value("membership", ""));
+  }
+
+  // NEW in 662a0cf1: notification/highlight counts. The sender's own counts
+  // reset on send (mirrors upstream private_read_set + reset in the append
+  // path); every other joined member's rules are evaluated and their counts
+  // bumped on notify/highlight.
+  // NEW in e1e529d8: local, non-deactivated members only (see loop filter).
+  reset_notification_counts(sender, room_id);
+  {
+    for (const auto& [k, member] : db_.roomid_userids.get_iter(room_id)) {
+      (void)k;
+      if (member == sender) continue;
+      // NEW in e1e529d8: push rules (and their counts) apply to local,
+      // non-deactivated members only — never to remote users.
+      const std::string local_suffix = ":" + hostname_;
+      if (member.size() < local_suffix.size() ||
+          member.compare(member.size() - local_suffix.size(), local_suffix.size(),
+                         local_suffix) != 0)
+        continue;
+      if (is_deactivated(member)) continue;
+      push_rules::PushRuleSet rules;
+      if (auto stored = get_push_rules(member)) {
+        // Stored shape is {"global": {kind: [rules]}} — parse each bucket.
+        const nlohmann::json& g =
+            stored->contains("global") ? (*stored)["global"] : *stored;
+        auto bucket = [&](const char* kind, push_rules::PushRuleKind rk,
+                          std::vector<push_rules::PushRule>& out) {
+          if (g.contains(kind) && g[kind].is_array()) {
+            for (const auto& rj : g[kind]) {
+              push_rules::PushRule r;
+              r.rule_id = rj.value("rule_id", "");
+              r.kind = rk;
+              r.enabled = rj.value("enabled", true);
+              if (rj.contains("conditions") && rj["conditions"].is_array())
+                for (const auto& cj : rj["conditions"]) {
+                  push_rules::PushCondition c;
+                  c.kind = cj.value("kind", "");
+                  c.content = cj;
+                  r.conditions.push_back(std::move(c));
+                }
+              if (rj.contains("actions") && rj["actions"].is_array())
+                for (const auto& aj : rj["actions"])
+                  if (aj.is_string()) r.actions.push_back(aj.get<std::string>());
+              out.push_back(std::move(r));
+            }
+          }
+        };
+        bucket("override", push_rules::PushRuleKind::Override, rules.override_rules);
+        bucket("underride", push_rules::PushRuleKind::Underride, rules.underride_rules);
+        bucket("sender", push_rules::PushRuleKind::Sender, rules.sender_rules);
+        bucket("room", push_rules::PushRuleKind::Room, rules.room_rules);
+        bucket("content", push_rules::PushRuleKind::Content, rules.content_rules);
+      } else {
+        rules = push_rules::get_default_push_rules();
+      }
+      std::string display_name = displayname_get(member).value_or("");
+      push_rules::PushActions acts = push_rules::get_actions(
+          member, display_name, rules, event, room_id);
+      const std::string userroom = member + '\xff' + room_id;
+      if (acts.notify)
+        db_.userroomid_notificationcount.update_and_fetch(userroom, utils::increment);
+      if (acts.highlight)
+        db_.userroomid_highlightcount.update_and_fetch(userroom, utils::increment);
+    }
   }
 
   return true;
@@ -887,13 +1269,20 @@ std::vector<std::string> Data::room_servers(const std::string& room_id) const {
   return servers;
 }
 
+// File-local helper (defined below, used by room_invite above).
+static nlohmann::json to_stripped(const nlohmann::json& pdu);
 
 bool Data::room_invite(const std::string& sender, const std::string& room_id,
-                       const std::string& user_id) {
+                       const std::string& user_id, bool is_direct) {
   // m.room.member invite state event, appended like any other pdu.
+  // NEW in 58463bba: content carries the target's displayname and is_direct
+  // (upstream MemberEventContent; avatar_url has no store here yet).
+  nlohmann::json content = {{"membership", "invite"}};
+  if (auto dn = displayname_get(user_id)) content["displayname"] = *dn;
+  if (is_direct) content["is_direct"] = true;
   nlohmann::json event = {
       {"type", "m.room.member"},
-      {"content", {{"membership", "invite"}}},
+      {"content", std::move(content)},
       {"event_id", "$thiswillbefilledinlater"},
       {"origin_server_ts", utils::millis_since_unix_epoch()},
       {"room_id", room_id},
@@ -903,9 +1292,27 @@ bool Data::room_invite(const std::string& sender, const std::string& room_id,
   };
   const std::string event_id = crypto::reference_hash(event);
   event["event_id"] = event_id;
-  pdu_append(event_id, room_id, std::move(event));
+  // NEW in 8773e501: capture invite_state (stripped create/join_rules/alias/avatar/
+  // name) before appending, so sync can serve it without scanning PDUs.
+  // NEW in 662a0cf1: also include the sender's member event and the invite
+  // event itself, like upstream does at invite time.
+  nlohmann::json invite_state = build_invite_state(room_id);
+  for (const auto& text : room_state(room_id)) {
+    try {
+      auto pdu = nlohmann::json::parse(text);
+      if (pdu.value("type", "") == "m.room.member" &&
+          pdu.value("state_key", "") == sender) {
+        invite_state.push_back(to_stripped(pdu));
+        break;
+      }
+    } catch (...) {}
+  }
+  pdu_append(event_id, room_id, nlohmann::json(event));
+  invite_state.push_back(to_stripped(event));
 
   db_.userid_inviteroomids.add(user_id, room_id);
+  update_membership(room_id, user_id, "invite", invite_state);
+  return true;
 }
 
 std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {
@@ -914,6 +1321,222 @@ std::vector<std::string> Data::rooms_invited(const std::string& user_id) const {
     rooms.push_back(value);
   }
   return rooms;
+}
+
+// --- NEW in 8773e501: incoming invites over federation -----------------------
+// Invite state: stripped (type/state_key/content/sender) copies of the room's
+// join_rules, canonical_alias, avatar and name state events at invite time.
+static nlohmann::json to_stripped(const nlohmann::json& pdu) {
+  nlohmann::json s;
+  s["type"] = pdu.value("type", "");
+  s["state_key"] = pdu.value("state_key", "");
+  s["sender"] = pdu.value("sender", "");
+  s["content"] = pdu.value("content", nlohmann::json::object());
+  return s;
+}
+
+nlohmann::json Data::build_invite_state(const std::string& room_id) const {
+  nlohmann::json state = nlohmann::json::array();
+  // NEW in 3e2f742f: the create event comes first in invite state.
+  for (const char* type : {"m.room.create", "m.room.join_rules", "m.room.canonical_alias",
+                            "m.room.avatar", "m.room.name"}) {
+    if (auto content = room_state_get(room_id, type, "")) {
+      // Reconstruct a stripped event from stored state content. Sender is
+      // unknown from content alone, so find the full PDU for fidelity.
+      bool pushed = false;
+      for (const auto& text : room_state(room_id)) {
+        try {
+          auto pdu = nlohmann::json::parse(text);
+          if (pdu.value("type", "") == type && pdu.value("state_key", "") == "") {
+            state.push_back(to_stripped(pdu));
+            pushed = true;
+            break;
+          }
+        } catch (...) {}
+      }
+      if (!pushed) {
+        state.push_back(nlohmann::json{{"type", type},
+                                        {"state_key", ""},
+                                        {"sender", ""},
+                                        {"content", *content}});
+      }
+    }
+  }
+  return state;
+}
+
+void Data::store_invite(const std::string& room_id, const std::string& user_id,
+                         const nlohmann::json& invite_state) {
+  update_membership(room_id, user_id, "invite", invite_state);
+}
+
+std::vector<std::pair<std::string, nlohmann::json>> Data::rooms_invited_with_state(
+    const std::string& user_id) const {
+  std::vector<std::pair<std::string, nlohmann::json>> out;
+  std::string prefix = user_id + '\xff';
+  for (const auto& [key, value] : db_.userroomid_invitestate.scan_prefix(prefix)) {
+    std::string room_id = key.substr(prefix.size());
+    try {
+      out.emplace_back(room_id, nlohmann::json::parse(value));
+    } catch (...) {
+      out.emplace_back(room_id, nlohmann::json::array());
+    }
+  }
+  // Fall back to legacy MultiValue entries that have no stored state yet.
+  for (const auto& room_id : rooms_invited(user_id)) {
+    bool known = false;
+    for (const auto& [r, _] : out)
+      if (r == room_id) known = true;
+    if (!known) out.emplace_back(room_id, nlohmann::json::array());
+  }
+  return out;
+}
+
+std::optional<uint64_t> Data::get_invite_count(const std::string& room_id,
+                                                const std::string& user_id) const {
+  auto v = db_.roomuserid_invitecount.get(room_id + '\xff' + user_id);
+  if (!v) return std::nullopt;
+  try {
+    return utils::u64_from_bytes(*v);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+// --- NEW in bc98425d: invite state as join server hints ----------------------
+std::optional<nlohmann::json> Data::invite_state(const std::string& user_id,
+                                                  const std::string& room_id) const {
+  auto v = db_.userroomid_invitestate.get(user_id + '\xff' + room_id);
+  if (!v) return std::nullopt;
+  try {
+    nlohmann::json state = nlohmann::json::parse(*v);
+    if (!state.is_array()) return std::nullopt;
+    return state;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::vector<std::string> Data::invite_state_servers(const nlohmann::json& state) {
+  // Mirrors upstream: senders of invite-state events -> their server names,
+  // order-preserving and deduplicated.
+  std::vector<std::string> servers;
+  if (!state.is_array()) return servers;
+  for (const auto& ev : state) {
+    if (!ev.is_object()) continue;
+    const std::string sender = ev.value("sender", "");
+    if (sender.empty() || sender[0] != '@') continue;
+    size_t colon = sender.find(':');
+    if (colon == std::string::npos || colon + 1 >= sender.size()) continue;
+    std::string server = sender.substr(colon + 1);
+    if (std::find(servers.begin(), servers.end(), server) == servers.end())
+      servers.push_back(std::move(server));
+  }
+  return servers;
+}
+
+// --- NEW in 662a0cf1: notification/highlight counts --------------------------
+uint64_t Data::notification_count(const std::string& user_id,
+                                   const std::string& room_id) const {
+  auto v = db_.userroomid_notificationcount.get(user_id + '\xff' + room_id);
+  if (!v) return 0;
+  try {
+    return utils::u64_from_bytes(*v);
+  } catch (...) {
+    return 0;
+  }
+}
+
+uint64_t Data::highlight_count(const std::string& user_id,
+                                const std::string& room_id) const {
+  auto v = db_.userroomid_highlightcount.get(user_id + '\xff' + room_id);
+  if (!v) return 0;
+  try {
+    return utils::u64_from_bytes(*v);
+  } catch (...) {
+    return 0;
+  }
+}
+
+void Data::reset_notification_counts(const std::string& user_id,
+                                      const std::string& room_id) {
+  const std::string key = user_id + '\xff' + room_id;
+  std::string zero(8, '\0');
+  db_.userroomid_notificationcount.insert(key, zero);
+  db_.userroomid_highlightcount.insert(key, zero);
+}
+
+Data::InviteResult Data::handle_incoming_invite(const std::string& room_id,
+                                                 nlohmann::json event,
+                                                 nlohmann::json invite_room_state) {
+  InviteResult r;
+  const std::string membership =
+      event.value("content", nlohmann::json::object()).value("membership", "");
+  const std::string sender = event.value("sender", "");
+  const std::string state_key = event.value("state_key", "");
+  const std::string ev_room = event.value("room_id", room_id);
+  if (membership != "invite" || sender.empty() || state_key.empty() || ev_room != room_id) {
+    r.errcode = "M_INVALID_PARAM";
+    r.error = "Invite event is invalid.";
+    return r;
+  }
+  // Only accept invites for local users.
+  const std::string local_suffix = ":" + hostname_;
+  if (state_key.size() < local_suffix.size() ||
+      state_key.compare(state_key.size() - local_suffix.size(), local_suffix.size(),
+                        local_suffix) != 0) {
+    r.errcode = "M_INVALID_PARAM";
+    r.error = "Invited user is not local.";
+    return r;
+  }
+  if (!invite_room_state.is_array()) invite_room_state = nlohmann::json::array();
+  // Sign the event as the receiving server (upstream hash_and_sign_event).
+  try {
+    crypto::hash_and_sign_event(hostname_, keypair_, event);
+  } catch (...) {
+    r.errcode = "M_INVALID_PARAM";
+    r.error = "Failed to sign event.";
+    return r;
+  }
+  // Append the stripped invite event to the invite state, like upstream does
+  // (it pushes the invite PDU itself with a $dummy id).
+  // NEW in 662a0cf1: also include the sender's member event when known.
+  for (const auto& text : room_state(room_id)) {
+    try {
+      auto pdu = nlohmann::json::parse(text);
+      if (pdu.value("type", "") == "m.room.member" &&
+          pdu.value("state_key", "") == sender) {
+        invite_room_state.push_back(to_stripped(pdu));
+        break;
+      }
+    } catch (...) {}
+  }
+  nlohmann::json stripped = to_stripped(event);
+  invite_room_state.push_back(stripped);
+  // Persist membership + invite state (no full PDU join; invite only).
+  update_membership(room_id, state_key, "invite", invite_room_state);
+  // Also record the invite PDU in state so membership_of() sees it.
+  try {
+    std::string state_key_bin;
+    state_key_bin.push_back('d');
+    state_key_bin += room_id;
+    state_key_bin.push_back(static_cast<char>(0xff));
+    state_key_bin += "m.room.member";
+    state_key_bin.push_back(static_cast<char>(0xff));
+    state_key_bin += state_key;
+    db_.roomstateid_pdu.insert(state_key_bin, event.dump());
+    const std::string event_id = event.value("event_id", "");
+    if (!event_id.empty()) {
+      const std::string index_bytes =
+          db_.pduid_pdus.update_and_fetch("n" + room_id, utils::increment);
+      uint64_t index = utils::u64_from_bytes(index_bytes);
+      db_.pduid_pdus.insert("d" + room_id + "#" + std::to_string(index), event.dump());
+      db_.eventid_pduid.insert(event_id, "d" + room_id + "#" + std::to_string(index));
+    }
+  } catch (...) {}
+  r.ok = true;
+  r.event = std::move(event);
+  return r;
 }
 
 // --- NEW in 3f4cb753: key backup store (folded base + remaining endpoints) ---
@@ -1110,3 +1733,204 @@ uint64_t Data::pdu_count(const std::string& pdu_id) const {
   // In a real implementation, we'd track the count in a separate tree
   return 0;
 }
+
+// NEW in a77fcd1: state_ids federation endpoint
+std::optional<uint64_t> Data::pdu_shortstatehash(const std::string& event_id) const {
+  // Get the shortstatehash from the event's state hash
+  auto pdu_id = get_pdu_id(event_id);
+  if (!pdu_id) return std::nullopt;
+  
+  // Look up the state hash for this pdu
+  // The state hash is stored in pduid_statehash tree
+  auto state_hash = db_.pduid_statehash.get(*pdu_id);
+  if (!state_hash) return std::nullopt;
+  
+  // Convert state_hash to shortstatehash
+  auto shortstatehash = db_.statehash_shortstatehash.get(state_hash.value());
+  if (!shortstatehash) return std::nullopt;
+  
+  // Convert bytes to uint64_t
+  if (shortstatehash.value().size() != 8) return std::nullopt;
+  uint64_t result = 0;
+  for (size_t i = 0; i < 8; ++i) {
+    result = (result << 8) | static_cast<uint8_t>(shortstatehash.value()[i]);
+  }
+  return result;
+}
+
+// NEW in fe744c85: push rules
+void Data::set_push_rules(const std::string& user_id, const nlohmann::json& rules) {
+  db_.user_push_rules.insert(user_id, rules.dump());
+}
+
+std::optional<nlohmann::json> Data::get_push_rules(const std::string& user_id) const {
+  auto rules = db_.user_push_rules.get(user_id);
+  if (!rules) return std::nullopt;
+  try {
+    return nlohmann::json::parse(*rules);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+void Data::add_pusher(const std::string& user_id, const std::string& pusher_id, const nlohmann::json& pusher) {
+  std::string key = user_id + static_cast<char>(0xff) + pusher_id;
+  db_.user_pusher.insert(key, pusher.dump());
+  db_.pusher_userid.insert(pusher_id, user_id);
+}
+
+std::optional<nlohmann::json> Data::get_pusher(const std::string& user_id, const std::string& pusher_id) const {
+  std::string key = user_id + static_cast<char>(0xff) + pusher_id;
+  auto pusher = db_.user_pusher.get(key);
+  if (!pusher) return std::nullopt;
+  try {
+    return nlohmann::json::parse(*pusher);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::vector<std::pair<std::string, nlohmann::json>> Data::get_pushers(const std::string& user_id) const {
+  std::vector<std::pair<std::string, nlohmann::json>> result;
+  std::string prefix = user_id + static_cast<char>(0xff);
+  for (const auto& [key, value] : db_.user_pusher.scan_prefix(prefix)) {
+    std::string pusher_id = key.substr(prefix.size());
+    try {
+      result.emplace_back(pusher_id, nlohmann::json::parse(value));
+    } catch (...) {
+      // Skip invalid entries
+    }
+  }
+  return result;
+}
+
+void Data::remove_pusher(const std::string& user_id, const std::string& pusher_id) {
+  std::string key = user_id + static_cast<char>(0xff) + pusher_id;
+  db_.user_pusher.erase(key);
+  db_.pusher_userid.erase(pusher_id);
+}
+
+// NEW in e50f2864: save state for send_join pdu
+std::optional<std::string> Data::append_to_state(const std::string& room_id,
+                                                 const nlohmann::json& event) {
+  // Compute the state hash for the room
+  std::vector<std::string> state_events = room_state(room_id);
+  
+  // Create a simple hash of the state events
+  // In a real implementation, this would use the proper state hash algorithm
+  std::string state_data;
+  for (const auto& ev : state_events) {
+    state_data += ev;
+  }
+  
+  // Simple hash for now - in reality this would be a proper hash
+  std::hash<std::string> hasher;
+  std::string state_hash = std::to_string(hasher(state_data));
+  
+  // Store the state hash with the room ID as key
+  std::string key = room_id + static_cast<char>(0xff) + state_hash;
+  db_.roomid_statehash.insert(key, "");
+  
+  return state_hash;
+}
+
+void Data::set_room_state(const std::string& room_id, const std::string& state_hash) {
+  // Set the room's current state hash
+  std::string key = room_id + static_cast<char>(0xff) + "current";
+  db_.roomid_statehash.insert(key, state_hash);
+}
+
+// NEW in e305889: room account data
+void Data::set_room_account_data(const std::string& room_id, const std::string& user_id,
+                                 const std::string& event_type, const nlohmann::json& data) {
+  // Key format: room_id + 0xff + user_id + 0xff + event_type
+  std::string key = room_id + static_cast<char>(0xff) + user_id + static_cast<char>(0xff) + event_type;
+  
+  // Store as JSON with event_type and data
+  nlohmann::json value;
+  value["event_type"] = event_type;
+  value["data"] = data;
+  
+  db_.roomuserid_accountdata.insert(key, value.dump());
+}
+
+std::optional<nlohmann::json> Data::get_room_account_data(const std::string& room_id,
+                                                          const std::string& user_id,
+                                                          const std::string& event_type) const {
+  // Key format: room_id + 0xff + user_id + 0xff + event_type
+  std::string key = room_id + static_cast<char>(0xff) + user_id + static_cast<char>(0xff) + event_type;
+  
+  auto value = db_.roomuserid_accountdata.get(key);
+  if (!value) return std::nullopt;
+  
+  try {
+    return nlohmann::json::parse(*value);
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::vector<std::string> Data::state_full_ids(uint64_t shortstatehash) const {
+  std::vector<std::string> result;
+  // Convert shortstatehash to big-endian bytes
+  std::array<uint8_t, 8> bytes;
+  for (int i = 7; i >= 0; --i) {
+    bytes[i] = static_cast<uint8_t>(shortstatehash & 0xFF);
+    shortstatehash >>= 8;
+  }
+  std::string key(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  
+  // Scan stateid_shorteventid for all short event IDs with this shortstatehash prefix
+  for (const auto& [shorteventid_bytes, value] : db_.stateid_shorteventid.scan_prefix(key)) {
+    // Convert shorteventid bytes to event_id
+    auto event_id_opt = db_.shorteventid_eventid.get(shorteventid_bytes);
+    if (event_id_opt) {
+      result.push_back(event_id_opt.value());
+    }
+  }
+  
+  return result;
+}
+
+// NEW in fe744c85: push rules
+
+// NEW in 6da4022: forward extremities + signing keys (declared in 6da4022,
+// defined here in 1f84013b when the federation verifier became their caller).
+std::vector<std::string> Data::get_forward_extremities(const std::string& room_id) const {
+  std::vector<std::string> out;
+  for (const auto& [k, v] : db_.roomid_forward_extremities.scan_prefix(room_id)) {
+    if (!v.empty()) out.push_back(v);
+  }
+  return out;
+}
+
+void Data::set_forward_extremities(const std::string& room_id,
+                                    const std::vector<std::string>& extremities) {
+  for (const auto& [k, v] : db_.roomid_forward_extremities.scan_prefix(room_id)) {
+    db_.roomid_forward_extremities.erase(k);
+  }
+  for (const auto& e : extremities) {
+    db_.roomid_forward_extremities.insert(room_id + '\xff' + e, e);
+  }
+}
+
+std::map<std::string, std::string> Data::get_signing_keys(
+    const std::string& server_name) const {
+  std::map<std::string, std::string> out;
+  for (const auto& [k, v] : db_.servertimeout_signingkey.scan_prefix(server_name + '\xff')) {
+    size_t pos = k.rfind('\xff');
+    if (pos != std::string::npos && pos + 1 < k.size()) out[k.substr(pos + 1)] = v;
+  }
+  return out;
+}
+
+void Data::add_signing_key(const std::string& server_name, const ServerSigningKeys& keys) {
+  for (const auto& [key_id, vk] : keys.verify_keys) {
+    db_.servertimeout_signingkey.insert(server_name + '\xff' + key_id, vk.key);
+  }
+}
+
+// NEW in e50f2864: save state for send_join pdu
+
+
+// NEW in e305889: room account data

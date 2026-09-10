@@ -26,4 +26,9 @@ std::optional<std::string> calculate_hash(const std::string& password);
 /// Version 1: 1 byte version (1) + 0xff + 32-byte Ed25519 key
 std::string generate_keypair();
 
+// NEW in e8f67089/77a23f89: ASCII case-insensitive substring search for user
+// and room directory filtering (upstream .to_lowercase() on both sides).
+std::string ascii_lower(std::string s);
+bool icontains(const std::string& haystack, const std::string& needle_lower);
+
 }  // namespace utils

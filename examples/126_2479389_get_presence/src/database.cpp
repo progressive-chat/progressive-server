@@ -45,14 +45,41 @@ void MultiValue::add(const std::string& id, const std::string& value) {
 
 Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
                    sled::Tree pp, MultiValue rl, sled::Tree ep,
+                   sled::Tree ps,
                    sled::Tree rs, MultiValue ru, MultiValue ur,
                    MultiValue ui, sled::Tree dn, MultiValue ul,
                    sled::Tree mf, sled::Tree ua,
                    sled::Tree ar, sled::Tree aa, sled::Tree pr,
-                    sled::Tree rs2,
-                    sled::Tree ro,
-                    sled::Tree ti,
-                    sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl)
+                   sled::Tree rs2,
+                   sled::Tree ro,
+                   sled::Tree ti,
+                   sled::Tree ba, sled::Tree be, sled::Tree bb, sled::Tree bl,
+                   // NEW in 100307c: Short ID system
+                   sled::Tree ssh, sled::Tree es, sled::Tree se,
+                   sled::Tree sk, sled::Tree sr, sled::Tree ss,
+                   sled::Tree ss2, sled::Tree rs3,
+                   // NEW in 6da4022: forward extremities and signing keys
+                   sled::Tree fe, sled::Tree sk2,
+                   // NEW in 44425a9: stateid_eventid
+                   sled::Tree se2,
+                   // NEW in 100307c: stateid_shorteventid
+                   sled::Tree sse,
+                   // NEW in e50f2864: room state hash
+                   sled::Tree rsh,
+                   // NEW in e50f2864: room account data
+                   sled::Tree rua, sled::Tree uda,
+                   // NEW in fe744c85: push rules
+                   sled::Tree upr, sled::Tree up2, sled::Tree pu,
+                   // NEW in 8773e501: incoming invites over federation
+                   sled::Tree uis, sled::Tree ric,
+                   // NEW in 662a0cf1: notification/highlight counts
+                   sled::Tree unc, sled::Tree uhc,
+// NEW in 71ed1b29: devicelist version
+                    sled::Tree udv,
+                    // NEW in cf94b8e7: uiaa request store (user+device+session -> request JSON)
+                    sled::Tree uir,
+                    // NEW in 2479389: latest presence event per (user, room)
+                    sled::Tree urp)
      : userid_password(std::move(up)),
       userid_deviceids(std::move(ud)),
       userdeviceid_token(std::move(ut)),
@@ -60,6 +87,7 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
       pduid_pdus(std::move(pp)),
       roomid_pduleaves(std::move(rl)),
       eventid_pduid(std::move(ep)),
+      pduid_statehash(std::move(ps)),
       roomstateid_pdu(std::move(rs)),
       roomid_userids(std::move(ru)),
       userid_roomids(std::move(ur)),
@@ -67,7 +95,7 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
       userid_displayname(std::move(dn)),
       userid_leftroomids(std::move(ul)),
       media(std::move(mf)),
-      uiaa(std::move(ua)),
+      uiaa(std::move(ua), std::move(uir)),
       alias_roomid(std::move(ar)),
       aliasid_alias(std::move(aa)),
       publicroomids(std::move(pr)),
@@ -77,7 +105,45 @@ Database::Database(sled::Tree up, MultiValue ud, sled::Tree ut, sled::Tree tu,
       backupid_algorithm(std::move(ba)),
       backupid_etag(std::move(be)),
       backupkeyid_backup(std::move(bb)),
-      backup_latest(std::move(bl)) {}
+      backup_latest(std::move(bl)),
+      // NEW in 100307c: Short ID system
+      statehash_shortstatehash(std::move(ssh)),
+      eventid_shorteventid(std::move(es)),
+      shorteventid_eventid(std::move(se)),
+      statekey_shortstatekey(std::move(sk)),
+      statehash_shortstatehash_rev(std::move(sr)),
+      shorteventid_shortstatehash(std::move(ss)),
+      shortstatehash_shorteventid(std::move(ss2)),
+      roomid_shortstatehash(std::move(rs3)),
+      // NEW in 6da4022: forward extremities and signing keys
+      roomid_forward_extremities(std::move(fe)),
+      servertimeout_signingkey(std::move(sk2)),
+      // NEW in 44425a9: stateid_eventid
+      stateid_eventid(std::move(se2)),
+      // NEW in 100307c: stateid_shorteventid
+      stateid_shorteventid(std::move(sse)),
+      // NEW in e50f2864: room state hash
+      roomid_statehash(std::move(rsh)),
+      // NEW in e50f2864: room account data
+      roomuserid_accountdata(std::move(rua)),
+      userid_accountdata(std::move(uda)),
+      // NEW in fe744c85: push rules
+      user_push_rules(std::move(upr)),
+      user_pusher(std::move(up2)),
+      pusher_userid(std::move(pu)),
+      // NEW in 8773e501: incoming invites over federation
+      userroomid_invitestate(std::move(uis)),
+      roomuserid_invitecount(std::move(ric)),
+      // NEW in 662a0cf1: notification/highlight counts
+      userroomid_notificationcount(std::move(unc)),
+      userroomid_highlightcount(std::move(uhc)),
+      // NEW in 71ed1b29: devicelist version
+      userid_devicelistversion(std::move(udv)),
+      // NEW in cf94b8e7: uiaa request store (user+device+session -> request JSON)
+      userdevicesessionid_uiaarequest(std::move(uir)),
+      // NEW in 2479389: latest presence event per (user, room)
+      userroomid_presence(std::move(urp)),
+      pdu_cache(1000) {}
 
 Database Database::open(sled::Db* db) {
   return Database(db->open_tree("userid_password"),
@@ -87,6 +153,7 @@ Database Database::open(sled::Db* db) {
                   db->open_tree("pduid_pdus"),
                   MultiValue(db->open_tree("roomid_pduleaves")),
                   db->open_tree("eventid_pduid"),
+                  db->open_tree("pduid_statehash"),
                   db->open_tree("roomstateid_pdu"),
                   MultiValue(db->open_tree("roomid_userids")),
                   MultiValue(db->open_tree("userid_roomids")),
@@ -104,7 +171,44 @@ Database Database::open(sled::Db* db) {
                   db->open_tree("backupid_algorithm"),
                   db->open_tree("backupid_etag"),
                   db->open_tree("backupkeyid_backup"),
-                  db->open_tree("backup_latest"));
+                  db->open_tree("backup_latest"),
+                  // NEW in 100307c: Short ID system
+                  db->open_tree("statehash_shortstatehash"),
+                  db->open_tree("eventid_shorteventid"),
+                  db->open_tree("shorteventid_eventid"),
+                  db->open_tree("statekey_shortstatekey"),
+                  db->open_tree("statehash_shortstatehash_rev"),
+                  db->open_tree("shorteventid_shortstatehash"),
+                  db->open_tree("shortstatehash_shorteventid"),
+                  db->open_tree("roomid_shortstatehash"),
+                  // NEW in 6da4022: forward extremities and signing keys
+                  db->open_tree("roomid_forward_extremities"),
+                  db->open_tree("servertimeout_signingkey"),
+                  // NEW in 44425a9: stateid_eventid
+                  db->open_tree("stateid_eventid"),
+                  // NEW in 100307c: stateid_shorteventid
+                  db->open_tree("stateid_shorteventid"),
+                  // NEW in e50f2864: room state hash
+                  db->open_tree("roomid_statehash"),
+                  // NEW in e50f2864: room account data
+                  db->open_tree("roomuserid_accountdata"),
+                  db->open_tree("userid_accountdata"),
+                  // NEW in fe744c85: push rules
+                  db->open_tree("user_push_rules"),
+                  db->open_tree("user_pusher"),
+                  db->open_tree("pusher_userid"),
+                  // NEW in 8773e501: incoming invites over federation
+                  db->open_tree("userroomid_invitestate"),
+                  db->open_tree("roomuserid_invitecount"),
+                  // NEW in 662a0cf1: notification/highlight counts
+                  db->open_tree("userroomid_notificationcount"),
+                  db->open_tree("userroomid_highlightcount"),
+                  // NEW in 71ed1b29: devicelist version
+                  db->open_tree("userid_devicelistversion"),
+                  // NEW in cf94b8e7: uiaa request store (user+device+session -> request JSON)
+                  db->open_tree("userdevicesessionid_uiaarequest"),
+                  // NEW in 2479389: latest presence event per (user, room)
+                  db->open_tree("userroomid_presence"));
 }
 
 }  // namespace database

@@ -21,6 +21,7 @@
 #include "routes.hpp"
 #include "server_server.hpp"
 #include "data.hpp"
+#include "proxy.hpp"
 #include "ruma_wrapper.hpp"
 #include "argon2.h"
 #include "utils.hpp"
@@ -106,6 +107,10 @@ ruma::MatrixResult<ruma::GetSupportedVersionsResponse> get_supported_versions_ro
 }
 
 // NEW in abcce95d (+ folded prerequisite createRoom).
+// Forward declaration: defined below next to invite_user_route (58463bba).
+std::optional<std::string> invite_helper(Context* ctx, const std::string& sender,
+                                         const std::string& target,
+                                         const std::string& room_id, bool is_direct);
 ruma::MatrixResult<ruma::CreateRoomResponse> create_room_route(
     Context* ctx, const ruma::CreateRoomRequest& body) {
   const std::string room_id = "!" + utils::random_string(18) + ":" + ctx->data->hostname();
@@ -144,16 +149,22 @@ ruma::MatrixResult<ruma::CreateRoomResponse> create_room_route(
   }
 
   // Verbatim power levels from the commit.
-  append_state("m.room.power_levels",
-               json{{"ban", 50},
-                    {"events_default", 0},
-                    {"invite", 50},
-                    {"kick", 50},
-                    {"redact", 50},
-                    {"state_default", 50},
-                    {"users", {{creator, 100}}},
-                    {"users_default", 0}},
-               "");
+  // NEW in f62258ba: a power_level_content_override ADDS to the defaults
+  // instead of replacing them.
+  // NEW in 7fa54e44: defaults come from the shared helper (adds events:{}
+  // and notifications:{room:50}, matching ruma's Default).
+  nlohmann::json pl_content = Data::default_power_levels(creator);
+  if (body.power_level_content_override) {
+    if (!body.power_level_content_override->is_object())
+      return ruma::MatrixResult<ruma::CreateRoomResponse>::err(ruma::Error{
+          .kind = ruma::ErrorKind::BadJson,
+          .message = "Invalid power_level_content_override.",
+          .status_code = 400,
+      });
+    for (auto& [k, v] : body.power_level_content_override->items())
+      pl_content[k] = v;
+  }
+  append_state("m.room.power_levels", std::move(pl_content), "");
 
   if (body.name) {
     append_state("m.room.name", json{{"name", *body.name}}, "");
@@ -163,7 +174,7 @@ ruma::MatrixResult<ruma::CreateRoomResponse> create_room_route(
   }
 
   // NEW in 3aa0c8ed: visibility + alias creation.
-  if (body.visibility == "public") ctx->data->set_public(room_id, true);
+  if (body.visibility.has_value() && *body.visibility == "public") ctx->data->set_public(room_id, true);
 
   if (body.room_alias_name) {
     const std::string alias =
@@ -178,21 +189,144 @@ ruma::MatrixResult<ruma::CreateRoomResponse> create_room_route(
     ctx->data->set_alias(alias, room_id);
   }
 
+  // NEW in 58463bba: remote-capable invites; per-invite failures are
+  // ignored (upstream `let _ =`).
   for (const auto& invitee : body.invite) {
-    ctx->data->room_invite(creator, room_id, invitee);
+    (void)invite_helper(ctx, creator, invitee, room_id, body.is_direct);
   }
 
   return ruma::MatrixResult<ruma::CreateRoomResponse>::ok(
       ruma::CreateRoomResponse{.room_id = room_id});
 }
 
+// NEW in 58463bba: invite_helper — local users get a locally-appended invite;
+// remote users get a locally-built, signed invite PDU sent to their server's
+// v1 /invite (which returns the signed event for local storage), mirroring
+// upstream invite_helper. Returns false on any failure.
+// Returns nullopt on success, otherwise an error message for the client
+// (remote Matrix errors arrive already prefixed as "Answer from ...").
+std::optional<std::string> invite_remote_user(
+    Context* ctx, const std::string& sender,
+                        const std::string& target, const std::string& target_server,
+                        const std::string& room_id, bool is_direct) {
+  try {
+    // prev_events: current leaves, capped at 20 (read-only; the leaf set is
+    // only touched when the signed event comes back and is appended).
+    std::vector<std::string> prev = ctx->data->pdu_leaves(room_id);
+    if (prev.size() > 20) prev.resize(20);
+    uint64_t depth = 0;
+    for (const auto& id : prev) {
+      if (auto text = ctx->data->pdu_get(id)) {
+        try {
+          depth = std::max(depth, nlohmann::json::parse(*text).value("depth", uint64_t(0)));
+        } catch (...) {}
+      }
+    }
+    depth += 1;
+
+    nlohmann::json content = {{"membership", "invite"}};
+    if (auto dn = ctx->data->displayname_get(target)) content["displayname"] = *dn;
+    if (is_direct) content["is_direct"] = true;
+    nlohmann::json unsigned_obj = nlohmann::json::object();
+    if (auto cur = ctx->data->room_state_get(room_id, "m.room.member", target))
+      unsigned_obj["prev_content"] = *cur;
+
+    nlohmann::json pdu = {
+        {"type", "m.room.member"},
+        {"content", std::move(content)},
+        {"room_id", room_id},
+        {"sender", sender},
+        {"state_key", target},
+        {"origin", ctx->data->hostname()},
+        {"origin_server_ts", utils::millis_since_unix_epoch()},
+        {"depth", depth},
+        {"prev_events", prev},
+        {"auth_events", nlohmann::json::array()},
+        {"unsigned", std::move(unsigned_obj)},
+    };
+    crypto::hash_and_sign_event(ctx->data->hostname(), ctx->data->keypair(), pdu);
+
+    // Invite state: base stripped state + sender member + the invite itself
+    // (same shape as the local path stores).
+    nlohmann::json invite_state = ctx->data->build_invite_state(room_id);
+    auto stripped = [](const nlohmann::json& e) {
+      return nlohmann::json{{"type", e.value("type", "")},
+                            {"state_key", e.value("state_key", "")},
+                            {"sender", e.value("sender", "")},
+                            {"content", e.value("content", nlohmann::json::object())}};
+    };
+    for (const auto& text : ctx->data->room_state(room_id)) {
+      try {
+        auto e = nlohmann::json::parse(text);
+        if (e.value("type", "") == "m.room.member" && e.value("state_key", "") == sender) {
+          invite_state.push_back(stripped(e));
+          break;
+        }
+      } catch (...) {}
+    }
+    invite_state.push_back(stripped(pdu));
+
+    auto resp = federation::send_request(
+        *ctx->data, target_server,
+        "/_matrix/federation/v1/invite/" + room_id + "/$receivingservershouldsetthis",
+        nlohmann::json{{"event", pdu},
+                       {"invite_room_state", invite_state},
+                       {"room_version", "6"}});
+    if (!resp || !resp->is_object() || !resp->contains("event") ||
+        !(*resp)["event"].is_object()) {
+      std::cerr << "[warn] Remote invite to " << target_server << " failed\n";
+      // NEW in e5c71195: forward the remote Matrix error when present.
+      if (resp && federation::is_remote_error(*resp))
+        return federation::remote_error_message(*resp, target_server);
+      return std::string("Failed to contact remote server for invite.");
+    }
+    nlohmann::json signed_ev = (*resp)["event"];
+    const std::string event_id = crypto::reference_hash(signed_ev);
+    signed_ev["event_id"] = event_id;
+    if (!ctx->data->pdu_append(event_id, room_id, signed_ev))
+      return std::string("event not authorized");
+    ctx->data->store_invite(room_id, target, invite_state);
+
+    // Fan the signed invite out to the room's other servers (best effort).
+    for (const auto& srv : ctx->data->room_servers(room_id)) {
+      if (srv == ctx->data->hostname() || srv == target_server) continue;
+      try {
+        federation::send_request(
+            *ctx->data, srv,
+            "/_matrix/federation/v1/send/" + utils::random_string(10),
+            nlohmann::json{{"pdus", nlohmann::json::array({signed_ev})}});
+      } catch (...) {}
+    }
+    return std::nullopt;
+  } catch (const std::exception& e) {
+    std::cerr << "[warn] Remote invite to " << target << " failed: " << e.what() << "\n";
+    return std::string("Failed to contact remote server for invite.");
+  } catch (...) {
+    return std::string("Failed to contact remote server for invite.");
+  }
+}
+
+std::optional<std::string> invite_helper(Context* ctx, const std::string& sender,
+                                         const std::string& target,
+                                         const std::string& room_id, bool is_direct) {
+  std::string target_server;
+  if (auto c = target.find(':'); c != std::string::npos) target_server = target.substr(c + 1);
+  if (!target_server.empty() && target_server != ctx->data->hostname()) {
+    return invite_remote_user(ctx, sender, target, target_server, room_id, is_direct);
+  }
+  if (!ctx->data->room_invite(sender, room_id, target, is_direct))
+    return std::string("event not authorized");
+  return std::nullopt;
+}
+
 void invite_user_route(Context* ctx, const ruma::InviteRequest& body,
                        httplib::Response& res) {
   if (!body.user_id.empty() && !body.target.empty()) {
-    if (!ctx->data->room_invite(body.user_id, body.room_id, body.target)) {
+    // NEW in e5c71195: remote refusal messages are forwarded to the client.
+    if (auto err = invite_helper(ctx, body.user_id, body.target, body.room_id, false)) {
       ruma::respond(res,
-                    nlohmann::json{{"errcode", "M_FORBIDDEN"},
-                                   {"error", "event not authorized"}},
+                    ruma::json{{"errcode", "M_FORBIDDEN"},
+                               {"error", std::move(*err)}},
                     403);
       return;
     }
@@ -205,10 +339,17 @@ void invite_user_route(Context* ctx, const ruma::InviteRequest& body,
 
 void search_users_route(Context* ctx, const ruma::SearchUsersRequest& body,
                         httplib::Response& res) {
+  // NEW in e8f67089: case-insensitive match on user id OR display name, and
+  // deactivated users are NOT filtered out anymore (shows more users).
   nlohmann::json results = nlohmann::json::array();
+  const std::string term = utils::ascii_lower(body.search_term);
   for (const auto& user : ctx->data->users_all()) {
-    if (ctx->data->is_deactivated(user)) continue;  // NEW in b8193984
-    if (user.find(body.search_term) != std::string::npos) {
+    bool match = utils::icontains(user, term);
+    if (!match) {
+      if (auto dn = ctx->data->displayname_get(user))
+        match = utils::icontains(*dn, term);
+    }
+    if (match) {
       results.push_back(json{{"user_id", user}});
     }
   }
@@ -231,33 +372,38 @@ ruma::MatrixResult<ruma::PublicRoomsResponse> get_public_rooms_filtered_helper(
   struct Entry {
     std::string room_id;
     long members;
-    std::optional<std::string> name;
+    nlohmann::json chunk;
   };
   std::vector<Entry> entries;
   // 3aa0c8ed: only rooms explicitly marked public appear.
-  for (const auto& room : ctx->data->public_rooms()) {
-    entries.push_back({room, static_cast<long>(ctx->data->room_users(room)), std::nullopt});
-    for (const auto& pdu_text : ctx->data->room_state(room)) {
-      auto pdu = nlohmann::json::parse(pdu_text);
-      if (pdu.value("type", "") == "m.room.name") {
-        entries.back().name = pdu["content"].value("name", "");
-        break;
-      }
+  // NEW in 3c3062a3: chunks come from targeted state lookups
+  // (Data::public_room_chunk), not full-state scans.
+  // NEW in 77a23f89: filter by case-insensitive generic_search_term over
+  // name, topic and canonical_alias.
+  std::string search_term;
+  if (filter.contains("generic_search_term") && filter["generic_search_term"].is_string())
+    search_term = utils::ascii_lower(filter["generic_search_term"].get<std::string>());
+  auto chunk_matches = [&search_term](const nlohmann::json& chunk) {
+    if (search_term.empty()) return true;
+    for (const char* field : {"name", "topic", "canonical_alias"}) {
+      if (chunk.contains(field) && chunk[field].is_string() &&
+          utils::icontains(chunk[field].get<std::string>(), search_term))
+        return true;
     }
+    return false;
+  };
+  for (const auto& room : ctx->data->public_rooms()) {
+    nlohmann::json chunk = ctx->data->public_room_chunk(room);
+    if (!chunk_matches(chunk)) continue;
+    long members = chunk.value("num_joined_members", 0L);
+    entries.push_back({room, members, std::move(chunk)});
   }
 
   std::sort(entries.begin(), entries.end(),
             [](const Entry& l, const Entry& r) { return l.members > r.members; });
 
-  for (const auto& e : entries) {
-    nlohmann::json chunk_entry{
-        {"guest_can_join", true},
-        {"num_joined_members", e.members},
-        {"room_id", e.room_id},
-        {"world_readable", false},
-    };
-    if (e.name) chunk_entry["name"] = *e.name;
-    resp.chunk.push_back(std::move(chunk_entry));
+  for (auto& e : entries) {
+    resp.chunk.push_back(std::move(e.chunk));
   }
 
   // Sort local rooms first (abcce95d), THEN extend with federated rooms
@@ -406,7 +552,7 @@ std::vector<std::string> resolve_alias_servers(Context* ctx, const std::string& 
 std::optional<std::string> send_join_request(
     Context* ctx, const std::string& room_id, const std::string& user_id,
     const std::vector<std::string>& servers, const std::string& path,
-    const nlohmann::json& content) {
+    const nlohmann::json& content, std::string* last_error = nullptr) {
   for (const auto& server : servers) {
     auto response = federation::send_request(
         *ctx->data, server, path,
@@ -417,6 +563,9 @@ std::optional<std::string> send_join_request(
     } else {
       std::cerr << "[debug] Join failed via server " << server
                 << ": " << (response ? response->dump() : "no response") << "\n";
+      // NEW in e5c71195: remember remote Matrix errors for forwarding.
+      if (last_error && response && federation::is_remote_error(*response))
+        *last_error = federation::remote_error_message(*response, server);
     }
   }
   return std::nullopt;
@@ -425,8 +574,10 @@ std::optional<std::string> send_join_request(
 // join_room_by_id_or_alias_route — handles both room_id and room_alias
 // NEW in c5313b3: "improvement: try out multiple servers when joining remote rooms"
 // Translates Conduit's join_room_by_id_or_alias_route with multiple server support
+// NEW in bc98425d: invite-state sender servers are join hints (plus the room's
+// own server), deduplicated like upstream's HashSet.
 ruma::MatrixResult<ruma::JoinRoomByIdResponse> join_room_by_id_or_alias_route(
-    Context* ctx, const nlohmann::json& body) {
+    Context* ctx, const nlohmann::json& body, const std::string& user_id) {
   std::string room_id_or_alias = body.value("room_id_or_alias", "");
   if (room_id_or_alias.empty()) {
     return ruma::MatrixResult<ruma::JoinRoomByIdResponse>::err(ruma::Error{
@@ -438,16 +589,24 @@ ruma::MatrixResult<ruma::JoinRoomByIdResponse> join_room_by_id_or_alias_route(
 
   std::string room_id;
   std::vector<std::string> servers;
+  auto push_server = [&servers](std::string server) {
+    if (!server.empty() &&
+        std::find(servers.begin(), servers.end(), server) == servers.end())
+      servers.push_back(std::move(server));
+  };
 
   // Try to parse as room ID first
   if (room_id_or_alias.find("!") == 0 && room_id_or_alias.find(":") != std::string::npos) {
     // It's a room ID
     room_id = room_id_or_alias;
+    // Invite-state sender servers first (bc98425d), then the room's server.
+    if (auto istate = ctx->data->invite_state(user_id, room_id))
+      for (auto& s : Data::invite_state_servers(*istate)) push_server(s);
     // Get servers from room ID's server name
     size_t colon_pos = room_id.find(':');
     if (colon_pos != std::string::npos) {
       std::string server = room_id.substr(colon_pos + 1);
-      servers.push_back(server);
+      push_server(server);
     }
   } else {
     // It's a room alias - resolve to room ID and get servers
@@ -458,7 +617,10 @@ ruma::MatrixResult<ruma::JoinRoomByIdResponse> join_room_by_id_or_alias_route(
     }
     const auto& response = std::get<ruma::GetAliasResponse>(alias_response.result);
     room_id = response.room_id;
-    servers = response.servers;
+    // Invite hints first, then directory servers (all deduplicated).
+    if (auto istate = ctx->data->invite_state(user_id, room_id))
+      for (auto& s : Data::invite_state_servers(*istate)) push_server(s);
+    for (auto& s : response.servers) push_server(s);
   }
 
   if (room_id.empty()) {
@@ -487,13 +649,19 @@ ruma::MatrixResult<ruma::JoinRoomByIdResponse> join_room_by_id_or_alias_route(
   std::string path = "/_matrix/federation/v1/make_join/" + room_id + "/" + "user_id";  // placeholder
   nlohmann::json content = nlohmann::json::object();  // placeholder
 
+  // NEW in e5c71195: forward the last remote Matrix error when every
+  // server refused, instead of only the generic message.
+  std::string last_remote_error;
   auto successful_server = send_join_request(ctx, room_id, "user_id", servers,
-                                             path, nlohmann::json::object());
+                                             path, nlohmann::json::object(),
+                                             &last_remote_error);
 
   if (!successful_server) {
+    std::string message = "Failed to join room via any server";
+    if (!last_remote_error.empty()) message = last_remote_error;
     return ruma::MatrixResult<ruma::JoinRoomByIdResponse>::err(ruma::Error{
         .kind = ruma::ErrorKind::Forbidden,
-        .message = "Failed to join room via any server",
+        .message = std::move(message),
         .status_code = 403,
     });
   }
@@ -628,15 +796,29 @@ ruma::MatrixResult<ruma::SyncResponse> sync_route(Context* ctx,
                                  ? ctx->data->pdus_since(room_id, 0)
                                  : ctx->data->pdus_since(room_id, since);
     joined.prev_batch = std::to_string(last);
+    // NEW in 662a0cf1: stored counts instead of scanning PDUs since last read.
+    joined.notification_count = ctx->data->notification_count(user_id, room_id);
+    joined.highlight_count = ctx->data->highlight_count(user_id, room_id);
     resp.joined.emplace(room_id, std::move(joined));
   }
 
-  // NEW in abcce95d: invited rooms carry stripped state events.
-  for (const auto& room_id : ctx->data->rooms_invited(user_id)) {
+  // NEW in 8773e501: invited rooms serve the stored invite_state directly
+  // (stripped create/join_rules/alias/avatar/name + the invite event itself) and
+  // skip rooms invited before `since` via the invite count.
+  for (const auto& [room_id, invite_state] : ctx->data->rooms_invited_with_state(user_id)) {
+    if (!is_initial_sync) {
+      if (auto count = ctx->data->get_invite_count(room_id, user_id)) {
+        if (since >= *count) continue;  // invited before last sync
+      }
+    }
     ruma::SyncResponse invited;
     invited.joined_room_id = room_id;
-    for (const auto& pdu_text : ctx->data->room_state(room_id)) {
-      invited.stripped_state.push_back(pdu_text);
+    if (invite_state.is_array() && !invite_state.empty()) {
+      for (const auto& ev : invite_state) invited.stripped_state.push_back(ev.dump());
+    } else {
+      for (const auto& pdu_text : ctx->data->room_state(room_id)) {
+        invited.stripped_state.push_back(pdu_text);
+      }
     }
     resp.invited.emplace(room_id, std::move(invited));
   }
@@ -656,10 +838,15 @@ int main(int argc, char** argv) {
 
   int port = static_cast<int>(kListenPort);
   std::string dir_override;
+  std::string proxy_override;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--port" && i + 1 < argc) port = std::stoi(argv[++i]);
     if (arg == "--data-dir" && i + 1 < argc) dir_override = argv[++i];
+    // NEW in b2d55160: arbitrary proxy for federation sends (upstream
+    // Config::proxy; TOML `proxy = ...` maps to --proxy / CONDUIT_PROXY here
+    // since this port has no TOML layer). See proxy.hpp for accepted shapes.
+    if (arg == "--proxy" && i + 1 < argc) proxy_override = argv[++i];
   }
 
   std::filesystem::path data_dir;
@@ -671,23 +858,108 @@ int main(int argc, char** argv) {
                ".local/share/conduit-step46";
   }
 
-  // NEW in 6b3934e: configurable cache capacity (default 1GB)
-  uint64_t cache_capacity = 1024 * 1024 * 1024;  // default 1GB
+  // NEW in 9d4fa9a2: the DB cache is configured in megabytes
+  // (--db-cache-capacity-mb, default 200.0), replacing the old 1GB
+  // cache_capacity. There is no TOML layer in this port, so the flag
+  // stands in for the `db_cache_capacity_mb` config key.
+  double db_cache_capacity_mb = 200.0;
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (arg == "--db-cache-capacity-mb" && i + 1 < argc) {
+      try {
+        db_cache_capacity_mb = std::stod(argv[++i]);
+      } catch (...) {
+        std::cerr << "[warn] Invalid --db-cache-capacity-mb value, using default 200.0\n";
+      }
+    }
+  }
 
-  static Data data = Data::load_or_create(data_dir, cache_capacity);
+  // NEW in 1d00a8c: better logging - set CONDUIT_LOG from config
+  const char* conduit_log = std::getenv("CONDUIT_LOG");
+  if (!conduit_log) {
+    ::setenv("CONDUIT_LOG", "info,rocket=off,_=off,sled=off", 0);
+  }
+
+  static Data data = Data::load_or_create(data_dir, db_cache_capacity_mb);
   data.set_hostname("localhost");
+  // NEW in b2d55160: proxy defaults to None (direct); --proxy wins over
+  // CONDUIT_PROXY, mirroring upstream `proxy = "none"` default.
+  {
+    std::string proxy_spec = proxy_override;
+    if (proxy_spec.empty()) {
+      if (const char* env = std::getenv("CONDUIT_PROXY")) proxy_spec = env;
+    }
+    if (!proxy_spec.empty()) data.set_proxy_config(proxy::ProxyConfig::parse(proxy_spec));
+  }
   static Context ctx{&data};
 
   httplib::Server svr;
+
+  // NEW in 1f84013b: federation ServerSignatures guard (upstream Ruma auth
+  // scheme). Rejects requests without a verifiable X-Matrix authorization
+  // header with 401 M_UNAUTHORIZED (upstream: custom 580 status).
+  auto require_federation_auth = [&ctx](const httplib::Request& req,
+                                        httplib::Response& res)
+      -> std::optional<std::string> {
+    nlohmann::json auth_body;
+    if (!req.body.empty()) {
+      try {
+        auth_body = nlohmann::json::parse(req.body, nullptr, false);
+      } catch (...) {
+        auth_body = nlohmann::json();
+      }
+      if (auth_body.is_discarded()) auth_body = nlohmann::json();
+    }
+    auto origin = federation::verify_federation_request(
+        *ctx.data, req.method, req.path, req.get_header_value("Authorization"),
+        auth_body);
+    if (!origin) {
+      ruma::respond(res,
+                    ruma::json{{"errcode", "M_UNAUTHORIZED"},
+                               {"error", "Missing or invalid Authorization header."}},
+                    401);
+      return std::optional<std::string>{};
+    }
+    return origin;
+  };
 
   svr.Get("/_matrix/client/versions", [](const httplib::Request&, httplib::Response& res) {
     ruma::respond(res, get_supported_versions_route());
   });
 
+  // NEW in dcb5e590: GET /_matrix/client/r0/capabilities REQUIRES
+  // authentication (upstream wrapped the handler in Ruma<...> so the request
+  // is rejected before the handler runs). The route body itself predates the
+  // commit upstream and was never translated here, so it is backfilled in
+  // the same shape: room versions capability with v6 stable + default.
+  svr.Get("/_matrix/client/r0/capabilities", [&ctx](const httplib::Request& req,
+                                                    httplib::Response& res) {
+    const auto token = extract_token(req);
+    if (!token || !ctx.data->user_from_token(*token)) {
+      ruma::respond(res,
+                    nlohmann::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                   {"error", "Unrecognised access token"}},
+                    401);
+      return;
+    }
+    ruma::respond(res,
+                  nlohmann::json{
+                      {"capabilities",
+                       {{"m.room_versions",
+                         {{"default", "6"},
+                          {"available", {{"6", "stable"}}}}}}}});
+  });
+
   svr.Post("/_matrix/client/r0/register", [&ctx](const httplib::Request& req,
                                                  httplib::Response& res) {
     auto body = nlohmann::json::parse(req.body, nullptr, false);
-    if (body.is_discarded()) body = nlohmann::json::object();
+    // NEW in 699f7767: the body must be valid JSON before a UIAA session
+    // may be created. Upstream `body.json_body` is None when the raw body
+    // fails to parse (e.g. invalid UTF-8 in an unknown field that ruma
+    // itself would ignore); the old `.expect("body is json")` panicked and
+    // produced an internal error. Return M_NOT_JSON instead.
+    const bool body_is_json = !body.is_discarded();
+    if (!body_is_json) body = nlohmann::json::object();
 
     const std::string username = body.value("username", "");
     nlohmann::json auth;
@@ -696,6 +968,13 @@ int main(int argc, char** argv) {
 
     // --- UIAA (b106d139-era flow formalized by c85d363d) -------------------
     if (!auth.contains("type")) {
+      if (!body_is_json) {
+        ruma::respond(res,
+                      nlohmann::json{{"errcode", ruma::errcode(ruma::ErrorKind::NotJson)},
+                                     {"error", "Not json."}},
+                      400);
+        return;
+      }
       // First request without auth: start a session and return 401 + flows.
       std::string session = utils::random_string(256);  // SESSION_ID_LENGTH
       nlohmann::json uiaainfo{
@@ -707,7 +986,7 @@ int main(int argc, char** argv) {
           {"params", nlohmann::json::object()},
           {"session", session},
       };
-      ctx.data->uiaa_create("@pending:" + session, "", uiaainfo);
+      ctx.data->uiaa_create("@pending:" + session, "", session, uiaainfo);
       ruma::respond(res,
                     nlohmann::json{
                         {"completed", nlohmann::json::array()},
@@ -1021,6 +1300,572 @@ int main(int argc, char** argv) {
             ruma::respond(res, body, 200);
           });
 
+  // NEW in 2479389: presence routes. Upstream's set_presence_route predates
+  // this commit and this port had no presence at all, so both are folded in:
+  //   PUT /presence/{userId}/status  — store an m.presence event per room
+  //   GET /presence/{userId}/status  — read the latest one over shared rooms
+  svr.Put(R"(/_matrix/client/r0/presence/([^/]+)/status)",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+            auto wrapper = ruma::Ruma<ruma::SetPresenceRequest>::from_request(req);
+            const auto token = extract_token(req);
+            std::optional<std::string> user;
+            if (!token || !(user = ctx.data->user_from_token(*token)) ||
+                *user != url_decode(req.matches[1])) {
+              ruma::respond(res,
+                            ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                       {"error", "Unrecognised access token"}},
+                            401);
+              return;
+            }
+            const std::string presence = wrapper.value.presence;
+            if (presence != "online" && presence != "offline" &&
+                presence != "unavailable") {
+              ruma::respond(res, ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                            {"error", "Invalid presence state."}},
+                            400);
+              return;
+            }
+            // Upstream stores the *timestamp* in last_active_ago; GET converts
+            // it to a duration.
+            nlohmann::json content = {{"presence", presence},
+                                      {"last_active_ago", utils::millis_since_unix_epoch()}};
+            if (auto dn = ctx.data->displayname_get(*user))
+              content["displayname"] = *dn;
+            if (wrapper.value.status_msg.has_value())
+              content["status_msg"] = *wrapper.value.status_msg;
+            nlohmann::json presence_event = {{"type", "m.presence"},
+                                             {"sender", *user},
+                                             {"content", std::move(content)}};
+            for (const auto& room_id : ctx.data->rooms_joined(*user)) {
+              ctx.data->update_presence(*user, room_id, presence_event);
+            }
+            ruma::respond(res, json::object());
+          });
+
+  svr.Get(R"(/_matrix/client/r0/presence/([^/]+)/status)",
+          [&ctx](const httplib::Request& req, httplib::Response& res) {
+            const auto token = extract_token(req);
+            std::optional<std::string> user;
+            if (!token || !(user = ctx.data->user_from_token(*token))) {
+              ruma::respond(res,
+                            ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                       {"error", "Unrecognised access token"}},
+                            401);
+              return;
+            }
+            const std::string target = url_decode(req.matches[1]);
+            ruma::GetPresenceResponse out;
+            for (const auto& room_id : ctx.data->shared_rooms(*user, target)) {
+              auto presence = ctx.data->get_last_presence_event(target, room_id);
+              if (!presence) continue;
+              const auto& c = presence->value("content", nlohmann::json::object());
+              out.presence = c.value("presence", std::string("offline"));
+              if (c.contains("status_msg") && c["status_msg"].is_string())
+                out.status_msg = c["status_msg"].get<std::string>();
+              if (c.contains("currently_active") && c["currently_active"].is_boolean())
+                out.currently_active = c["currently_active"].get<bool>();
+              if (c.contains("last_active_ago") && c["last_active_ago"].is_number()) {
+                const uint64_t stored = c["last_active_ago"].get<uint64_t>();
+                const uint64_t now = utils::millis_since_unix_epoch();
+                out.last_active_ago = now > stored ? now - stored : 0;
+              }
+            }
+            // Upstream `todo!()`s when the target has no stored presence;
+            // this port returns an offline status instead of panicking.
+            // NOTE: upstream loops get_last_presence_event(&sender_user, ..)
+            // (a bug that returns the requester's presence); this port reads
+            // the requested user's presence, as intended.
+            ruma::respond(res, ruma::to_json(out));
+          });
+  // --- NEW in e305889: room account data -------------------------------------
+  // PUT /_matrix/client/r0/user/<user_id>/rooms/<room_id>/account_data/<event_type>
+  svr.Put(R"(/_matrix/client/r0/user/([^/]+)/rooms/([^/]+)/account_data/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             // Check if user can modify this account data (can only modify own)
+             if (*user != req.matches[1]) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_FORBIDDEN"},
+                                        {"error", "Cannot modify other user's account data"}},
+                             403);
+               return;
+             }
+             std::string room_id = req.matches[2];
+             std::string event_type = req.matches[3];
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body, nullptr, false);
+             } catch (...) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Invalid JSON"}},
+                             400);
+               return;
+             }
+             if (!body.contains("data")) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Missing data field"}},
+                             400);
+               return;
+             }
+             ctx.data->set_room_account_data(req.matches[2], *user, req.matches[3], body["data"]);
+             ruma::respond(res, ruma::json::object(), 200);
+           });
+
+  // GET /_matrix/client/r0/user/<user_id>/rooms/<room_id>/account_data/<event_type>
+  svr.Get(R"(/_matrix/client/r0/user/([^/]+)/rooms/([^/]+)/account_data/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             // Check if user can read this account data (can only read own)
+             if (*user != req.matches[1]) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_FORBIDDEN"},
+                                        {"error", "Cannot read other user's account data"}},
+                             403);
+               return;
+             }
+             auto data = ctx.data->get_room_account_data(req.matches[2], *user, req.matches[3]);
+             if (!data) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_NOT_FOUND"},
+                                        {"error", "Data not found"}},
+                             404);
+               return;
+             }
+             ruma::respond(res, *data);
+           });
+
+  // --- NEW in fe744c85: push rules -------------------------------------------
+  // Upstream fe744c85 refactored push.rs from iter().find() to .get()/.replace()
+  // on ruma's Ruleset (IndexSet). C++ stores {"global": {kind: [rules]}} per user
+  // via Data::set/get_push_rules and implements replace/get/remove semantics.
+  // PUT /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>
+  svr.Put(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string scope = req.matches[1];
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             if (scope != "global") {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                        {"error", "Scopes other than 'global' are not supported."}},
+                             400);
+               return;
+             }
+             if (kind != "override" && kind != "underride" && kind != "sender" &&
+                 kind != "room" && kind != "content") {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                        {"error", "Invalid push rule kind."}},
+                             400);
+               return;
+             }
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+             } catch (...) {
+               body = nlohmann::json::object();
+             }
+             if (body.is_discarded()) body = nlohmann::json::object();
+             // Build rule with .replace() semantics (fe744c85): remove existing
+             // with same rule_id, then insert new.
+             nlohmann::json rule;
+             rule["rule_id"] = rule_id;
+             rule["default"] = false;
+             rule["enabled"] = true;
+             rule["actions"] = body.value("actions", nlohmann::json::array());
+             if (kind == "override" || kind == "underride") {
+               rule["conditions"] = body.value("conditions", nlohmann::json::array());
+             } else if (kind == "content") {
+               rule["pattern"] = body.value("pattern", "");
+             }
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             nlohmann::json cur = cur_opt.value_or(
+                 nlohmann::json{{"global", {
+                     {"override", nlohmann::json::array()},
+                     {"underride", nlohmann::json::array()},
+                     {"sender", nlohmann::json::array()},
+                     {"room", nlohmann::json::array()},
+                     {"content", nlohmann::json::array()},
+                 }}});
+             if (!cur.contains("global") || !cur["global"].is_object())
+               cur["global"] = nlohmann::json::object();
+             if (!cur["global"].contains(kind) || !cur["global"][kind].is_array())
+               cur["global"][kind] = nlohmann::json::array();
+             nlohmann::json updated = nlohmann::json::array();
+             for (auto& r : cur["global"][kind]) {
+               if (!(r.is_object() && r.value("rule_id", "") == rule_id)) updated.push_back(r);
+             }
+             updated.push_back(rule);
+             cur["global"][kind] = std::move(updated);
+             ctx.data->set_push_rules(*user, cur);
+             ruma::respond(res, nlohmann::json::object(), 200);
+           });
+
+  // GET /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>
+  svr.Get(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string scope = req.matches[1];
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             if (scope != "global") {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                        {"error", "Scopes other than 'global' are not supported."}},
+                             400);
+               return;
+             }
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               for (auto& r : (*cur_opt)["global"][kind]) {
+                 if (r.is_object() && r.value("rule_id", "") == rule_id) {
+                   ruma::respond(res, r);
+                   return;
+                 }
+               }
+             }
+             ruma::respond(res,
+                           ruma::json{{"errcode", "M_NOT_FOUND"},
+                                      {"error", "Push rule not found."}},
+                           404);
+           });
+
+  // DELETE /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>
+  svr.Delete(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string scope = req.matches[1];
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             if (scope != "global") {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                        {"error", "Scopes other than 'global' are not supported."}},
+                             400);
+               return;
+             }
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               nlohmann::json cur = *cur_opt;
+               nlohmann::json updated = nlohmann::json::array();
+               for (auto& r : cur["global"][kind]) {
+                 if (!(r.is_object() && r.value("rule_id", "") == rule_id)) updated.push_back(r);
+               }
+               cur["global"][kind] = std::move(updated);
+               ctx.data->set_push_rules(*user, cur);
+             }
+             ruma::respond(res, nlohmann::json::object(), 200);
+           });
+
+  // GET /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>/actions
+  svr.Get(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+)/actions)",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               for (auto& r : (*cur_opt)["global"][kind]) {
+                 if (r.is_object() && r.value("rule_id", "") == rule_id) {
+                   ruma::respond(res, nlohmann::json{{"actions", r.value("actions", nlohmann::json::array())}});
+                   return;
+                 }
+               }
+             }
+             ruma::respond(res,
+                           ruma::json{{"errcode", "M_NOT_FOUND"},
+                                      {"error", "Push rule not found."}},
+                           404);
+           });
+
+  // PUT /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>/actions
+  svr.Put(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+)/actions)",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+             } catch (...) {
+               body = nlohmann::json::object();
+             }
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               nlohmann::json cur = *cur_opt;
+               for (auto& r : cur["global"][kind]) {
+                 if (r.is_object() && r.value("rule_id", "") == rule_id) {
+                   r["actions"] = body.value("actions", nlohmann::json::array());
+                   ctx.data->set_push_rules(*user, cur);
+                   ruma::respond(res, nlohmann::json::object(), 200);
+                   return;
+                 }
+               }
+             }
+             ruma::respond(res,
+                           ruma::json{{"errcode", "M_NOT_FOUND"},
+                                      {"error", "Push rule not found."}},
+                           404);
+           });
+
+  // GET /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>/enabled
+  svr.Get(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+)/enabled)",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               for (auto& r : (*cur_opt)["global"][kind]) {
+                 if (r.is_object() && r.value("rule_id", "") == rule_id) {
+                   ruma::respond(res, nlohmann::json{{"enabled", r.value("enabled", true)}});
+                   return;
+                 }
+               }
+             }
+             ruma::respond(res,
+                           ruma::json{{"errcode", "M_NOT_FOUND"},
+                                      {"error", "Push rule not found."}},
+                           404);
+           });
+
+  // PUT /_matrix/client/r0/pushrules/<scope>/<kind>/<rule_id>/enabled
+  svr.Put(R"(/_matrix/client/r0/pushrules/([^/]+)/([^/]+)/([^/]+)/enabled)",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             const std::string kind = req.matches[2];
+             const std::string rule_id = req.matches[3];
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+             } catch (...) {
+               body = nlohmann::json::object();
+             }
+             auto cur_opt = ctx.data->get_push_rules(*user);
+             if (cur_opt && cur_opt->contains("global") && (*cur_opt)["global"].contains(kind) &&
+                 (*cur_opt)["global"][kind].is_array()) {
+               nlohmann::json cur = *cur_opt;
+               for (auto& r : cur["global"][kind]) {
+                 if (r.is_object() && r.value("rule_id", "") == rule_id) {
+                   r["enabled"] = body.value("enabled", true);
+                   ctx.data->set_push_rules(*user, cur);
+                   ruma::respond(res, nlohmann::json::object(), 200);
+                   return;
+                 }
+               }
+             }
+             ruma::respond(res,
+                           ruma::json{{"errcode", "M_NOT_FOUND"},
+                                      {"error", "Push rule not found."}},
+                           404);
+           });
+
+  // GET /_matrix/client/r0/pushrules/
+  svr.Get("/_matrix/client/r0/pushrules",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             auto rules = ctx.data->get_push_rules(*user);
+             if (!rules) {
+               ruma::respond(res, nlohmann::json{{"global", {
+                   {"override", nlohmann::json::array()},
+                   {"underride", nlohmann::json::array()},
+                   {"sender", nlohmann::json::array()},
+                   {"room", nlohmann::json::array()},
+                   {"content", nlohmann::json::array()},
+               }}});
+             } else {
+               ruma::respond(res, *rules);
+             }
+           });
+
+  // --- NEW in fe744c85: pushers ----------------------------------------------
+  // POST /_matrix/client/r0/pushers/set
+  svr.Post("/_matrix/client/r0/pushers/set",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+             } catch (...) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Invalid JSON"}},
+                             400);
+               return;
+             }
+             if (body.is_discarded()) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Invalid JSON"}},
+                             400);
+               return;
+             }
+             if (!body.contains("pushkey") || !body["pushkey"].is_string()) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Missing pushkey"}},
+                             400);
+               return;
+             }
+             std::string pushkey = body["pushkey"].get<std::string>();
+             // Upstream set_pusher: kind == null means delete the pusher.
+             if (!body.contains("kind") || body["kind"].is_null()) {
+               std::string app_id = body.value("app_id", "");
+               // Our store keys by pushkey; also try pushkey+app_id form.
+               ctx.data->remove_pusher(*user, pushkey);
+               if (!app_id.empty()) ctx.data->remove_pusher(*user, pushkey + "\xff" + app_id);
+               ruma::respond(res, nlohmann::json::object(), 200);
+               return;
+             }
+             // Validate required fields for add
+             if (!body.contains("app_id") || !body.contains("app_display_name") ||
+                 !body.contains("device_display_name") || !body.contains("lang") ||
+                 !body.contains("data")) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_BAD_JSON"},
+                                        {"error", "Missing required fields"}},
+                             400);
+               return;
+             }
+             std::string pusher_id = pushkey;
+             ctx.data->add_pusher(*user, pusher_id, body);
+             ruma::respond(res, nlohmann::json::object(), 200);
+           });
+
+  // DELETE /_matrix/client/r0/pushers/<pushkey>
+  svr.Delete(R"(/_matrix/client/r0/pushers/([^/]+))",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             std::string pushkey = req.matches[1];
+             ctx.data->remove_pusher(*user, pushkey);
+             ruma::respond(res, nlohmann::json::object(), 200);
+           });
+
+  // GET /_matrix/client/r0/pushers
+  svr.Get("/_matrix/client/r0/pushers",
+           [&ctx](const httplib::Request& req, httplib::Response& res) {
+             const auto token = extract_token(req);
+             std::optional<std::string> user;
+             if (!token || !(user = ctx.data->user_from_token(*token))) {
+               ruma::respond(res,
+                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
+                                        {"error", "Unrecognised access token"}},
+                             401);
+               return;
+             }
+             auto pushers = ctx.data->get_pushers(*user);
+             nlohmann::json result = nlohmann::json{{"pushers", nlohmann::json::array()}};
+             for (const auto& [pusher_id, pusher] : pushers) {
+               result["pushers"].push_back(pusher);
+             }
+             ruma::respond(res, result);
+           });
+
+
   // Real membership: joining appends an m.room.member join state event.
   svr.Post(R"(/_matrix/client/r0/join/(.+))",
            [&ctx](const httplib::Request& req, httplib::Response& res) {
@@ -1070,13 +1915,39 @@ int main(int argc, char** argv) {
 
                 const std::string fpath = "/_matrix/federation/v1/send_join/" +
                                           room_id + "/" + join_event_id;
-                auto fresp = federation::send_request(
-                    *ctx.data, fremote, fpath, json::object());
+                // NEW in bc98425d: use invite state as hints for which servers
+                // to ask when joining — sender servers first, then the room's
+                // own server, deduplicated (upstream collects a HashSet).
+                std::vector<std::string> join_servers;
+                if (auto istate = ctx.data->invite_state(*user, room_id))
+                  join_servers = Data::invite_state_servers(*istate);
+                if (!fremote.empty() &&
+                    std::find(join_servers.begin(), join_servers.end(), fremote) ==
+                        join_servers.end())
+                  join_servers.push_back(fremote);
+                std::optional<nlohmann::json> fresp;
+                // NEW in e5c71195: keep trying candidates past remote Matrix
+                // errors; remember the last one to forward to the client.
+                std::string last_remote_error;
+                for (const auto& candidate : join_servers) {
+                  fresp = federation::send_request(
+                      *ctx.data, candidate, fpath, json::object());
+                  if (!fresp) continue;
+                  if (federation::is_remote_error(*fresp)) {
+                    last_remote_error =
+                        federation::remote_error_message(*fresp, candidate);
+                    fresp = std::nullopt;
+                    continue;
+                  }
+                  break;
+                }
                 if (!fresp) {
+                  std::string message =
+                      "Failed to contact remote server for federation join.";
+                  if (!last_remote_error.empty()) message = last_remote_error;
                   ruma::respond(res,
                                 ruma::json{{"errcode", "M_UNKNOWN"},
-                                           {"error", "Failed to contact remote server "
-                                                     "for federation join."}},
+                                           {"error", std::move(message)}},
                                 502);
                   return;
                 }
@@ -1087,10 +1958,33 @@ int main(int argc, char** argv) {
                 for (const char* key : {"auth_chain", "state"}) {
                   if ((*fresp).contains(key) && (*fresp)[key].is_array()) {
                     for (auto& pdu : (*fresp)[key]) {
-                      if (pdu.contains("event_id") && pdu.contains("room_id")) {
+                      // NEW in 989d843c: invalid PDUs in the server response
+                      // are logged with context and skipped (never crash the
+                      // join on a malformed entry).
+                      try {
+                        if (!pdu.contains("event_id") || !pdu.contains("room_id")) continue;
+                        // NEW in 1dc85895: warn on invalid user ids in the
+                        // send_join response (upstream fails the join; we skip
+                        // the malformed PDU and continue).
+                        if (pdu.value("type", "") == "m.room.member") {
+                          const std::string sk = pdu.value("state_key", "");
+                          if (sk.empty() || sk[0] != '@' ||
+                              sk.find(':') == std::string::npos) {
+                            std::clog << "[warn] Invalid user id in send_join "
+                                         "response: "
+                                      << sk << "\n";
+                            continue;
+                          }
+                        }
                         const std::string eid = pdu["event_id"].get<std::string>();
+                        // 989d843c reverts f62258ba's verbose warn here back
+                        // to a silent skip once verification/storage fails.
                         if (seen_events.insert(eid).second && !ctx.data->pdu_get(eid))
-                          ctx.data->pdu_append(eid, room_id, pdu);
+                          (void)ctx.data->pdu_append(eid, room_id, pdu);
+                      } catch (const std::exception& e) {
+                        std::cerr << "[warn] Invalid PDU in server response: "
+                                  << pdu.dump().substr(0, 200) << ": " << e.what() << "\n";
+                        continue;
                       }
                     }
                   }
@@ -1151,7 +2045,7 @@ int main(int argc, char** argv) {
 
              // Use the join_room_by_id_or_alias_route function
              nlohmann::json body = {{"room_id_or_alias", room_id_or_alias}};
-             auto result = join_room_by_id_or_alias_route(&ctx, body);
+             auto result = join_room_by_id_or_alias_route(&ctx, body, *user);
 
              if (result.result.index() == 1) {  // err
                auto err = std::get<ruma::Error>(result.result);
@@ -1176,6 +2070,10 @@ int main(int argc, char** argv) {
                return;
              }
              wrapper.value.room_id = req.matches[1];
+             // NEW in 8773e501: the sender lives on the Ruma wrapper (from the
+             // access token), not in the JSON body — copy it into the request
+             // struct (previously body.user_id was always empty -> 404).
+             wrapper.value.user_id = wrapper.user_id.value_or("");
              invite_user_route(&ctx, wrapper.value, res);
            });
 
@@ -1409,23 +2307,25 @@ int main(int argc, char** argv) {
           });
 
   // Better public room directory (abcce95d).
-  svr.Post("/_matrix/client/r0/publicRooms", [&ctx](const httplib::Request&,
+  svr.Post("/_matrix/client/r0/publicRooms", [&ctx](const httplib::Request& req,
                                                     httplib::Response& res) {
-    ruma::respond(res, get_public_rooms_route(&ctx));
+    // NEW in 77a23f89: honor the filter body (generic_search_term) instead
+    // of always returning the unfiltered list.
+    nlohmann::json body;
+    try {
+      body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+    } catch (...) {
+      body = nlohmann::json::object();
+    }
+    if (body.is_discarded() || !body.is_object()) body = nlohmann::json::object();
+    ruma::respond(res, get_public_rooms_filtered_route(&ctx, body));
   });
 
   // Federation endpoint: GET /_matrix/federation/v1/publicRooms (Conduit 4e44fed)
   svr.Post("/_matrix/federation/v1/publicRooms",
-           [&ctx](const httplib::Request& req, httplib::Response& res) {
-             const auto token = extract_token(req);
-             std::optional<std::string> user;
-             if (!token || !(user = ctx.data->user_from_token(*token))) {
-               ruma::respond(res,
-                             ruma::json{{"errcode", "M_UNKNOWN_TOKEN"},
-                                        {"error", "Unrecognised access token"}},
-                             401);
-               return;
-             }
+           [&ctx, &require_federation_auth](const httplib::Request& req,
+                                            httplib::Response& res) {
+             if (!require_federation_auth(req, res)) return;
              nlohmann::json body;
              try {
                body = nlohmann::json::parse(req.body, nullptr, false);
@@ -1434,6 +2334,20 @@ int main(int argc, char** argv) {
              }
              ruma::respond(res, get_public_rooms_filtered_route(&ctx, body));
            });
+  // Federation endpoint: GET /_matrix/federation/v1/state_ids/<event_id> (Conduit a77fcd1)
+  svr.Get(R"(/_matrix/federation/v1/state_ids/(.+))",
+           [&ctx, &require_federation_auth](const httplib::Request& req,
+                                            httplib::Response& res) {
+             if (!require_federation_auth(req, res)) return;
+             std::string event_id = req.matches[1];
+             nlohmann::json result = federation::get_room_state_ids(*ctx.data, event_id);
+             if (result.contains("errcode")) {
+               ruma::respond(res, result, 404);
+             } else {
+               ruma::respond(res, result);
+             }
+           });
+
 
   svr.Put(R"(/_matrix/client/r0/rooms/(.+)/send/(.+)/(.+))",
           [&ctx](const httplib::Request& req, httplib::Response& res) {
@@ -1490,6 +2404,22 @@ int main(int argc, char** argv) {
             ruma::respond(res, nlohmann::json{
                                    {"server",
                                     {{"name", "Conduit"}, {"version", "0.1.0"}}}});
+          });
+
+  // NEW in 71ed1b29: federation device list.
+  // GET /_matrix/federation/v1/user/devices/:userId -> {user_id, stream_id,
+  // devices}. Lets remote servers track our users' device lists.
+  svr.Get(R"(/_matrix/federation/v1/user/devices/(.+))",
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
+            const std::string user_id = url_decode(req.matches[1]);
+            auto result = federation::get_user_devices(*ctx.data, user_id);
+            if (result.contains("errcode")) {
+              ruma::respond(res, result, 404);
+            } else {
+              ruma::respond(res, result, 200);
+            }
           });
 
   // GET /_matrix/key/v2/server (+ deprecated :key_id variant) — the signed
@@ -1635,6 +2565,9 @@ int main(int argc, char** argv) {
           });
 
   // NEW in b8193984: POST /account/deactivate — UIAA, leave/reject rooms,
+  // (registration line restored in e1e529d8 step: the handler below was
+  // orphaned with no route, so deactivation was unreachable).
+  svr.Post("/_matrix/client/r0/account/deactivate",
            [&ctx](const httplib::Request& req, httplib::Response& res) {
     const auto token = extract_token(req);
     std::optional<std::string> user;
@@ -1697,7 +2630,7 @@ int main(int argc, char** argv) {
     std::clog << "[info] " << *user << " deactivated their account\n";
 
     ruma::respond(res, json{{"id_server_unbind_result", "no-support"}});
-  });
+  }); 
 
   // --- NEW in 3aa0c8ed: directory routes ---------------------------------
   svr.Put(R"(/_matrix/client/r0/directory/room/(.+))",
@@ -1777,8 +2710,11 @@ int main(int argc, char** argv) {
             const std::string event_id = crypto::reference_hash(event);
             event["event_id"] = event_id;
             event["redacts"] = target_event;
+            // NEW in ddcf1a71: pass the redaction event so unsigned carries
+            // redacted_because as an object (kept copy: event is moved below).
+            nlohmann::json redaction_copy = event;
             ctx.data->pdu_append(event_id, room_id, std::move(event));
-            ctx.data->redact_pdu(target_event);
+            ctx.data->redact_pdu(target_event, redaction_copy);
 
             ruma::respond(res, nlohmann::json{{"event_id", event_id}});
           });
@@ -2156,7 +3092,9 @@ int main(int argc, char** argv) {
   // NEW in 1f292c09: federation transaction endpoint. A remote server delivers
   // PDUs here; we append each only if the room already exists locally.
   svr.Post(R"(/_matrix/federation/v1/send/([^/]+))",
-           [&ctx](const httplib::Request& req, httplib::Response& res) {
+           [&ctx, &require_federation_auth](const httplib::Request& req,
+                                            httplib::Response& res) {
+             if (!require_federation_auth(req, res)) return;
              json body;
              try { body = json::parse(req.body); } catch (...) { body = json::object(); }
              if (!body.contains("pdus") || !body["pdus"].is_array()) {
@@ -2165,6 +3103,9 @@ int main(int argc, char** argv) {
                return;
              }
              int appended = 0;
+             // NEW in 7db59c55: report per-PDU results (upstream resolved_map):
+             // successfully stored PDUs map to {}, failures to Matrix errors.
+             nlohmann::json pdus_result = nlohmann::json::object();
              for (auto& pdu_str : body["pdus"]) {
                json pdu;
                try {
@@ -2188,76 +3129,103 @@ int main(int argc, char** argv) {
                  event["state_key"] = pdu["state_key"];
                const std::string event_id = crypto::reference_hash(event);
                event["event_id"] = event_id;
-               if (ctx.data->pdu_append(event_id, room_id, std::move(event)))
+               if (ctx.data->pdu_append(event_id, room_id, std::move(event))) {
                  ++appended;
+                 pdus_result[event_id] = nlohmann::json::object();
+               } else {
+                 pdus_result[event_id] = nlohmann::json{
+                     {"errcode", "M_FORBIDDEN"}, {"error", "event not authorized"}};
+               }
              }
-             ruma::respond(res, ruma::json{{"pdus", json::object()}}, 200);
+             ruma::respond(res, ruma::json{{"pdus", std::move(pdus_result)}}, 200);
            });
 
-  // NEW in eedac4f: make_join (federation) — return an unsigned join event
-  // template for the remote to sign. The remote will then POST the signed
-  // event to /send_join. Adapted: we report a default room version (1) and
-  // include a basic event stub; full auth-events collection is not done
-  // because we don't track per-room versions or full state-res locally.
+  // NEW in eedac4fd: make_join, send_join and /directory federation endpoints.
+  // GET /_matrix/federation/v1/make_join/<roomId>/<userId>
   svr.Get(R"(/_matrix/federation/v1/make_join/([^/]+)/([^/]+))",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const std::string room_id = url_decode(req.matches[1]);
             const std::string user_id = url_decode(req.matches[2]);
-            if (ctx.data->room_state(room_id).empty()) {
-              ruma::respond(res,
-                            ruma::json{{"errcode", "M_NOT_FOUND"},
-                                       {"error", "Room not found."}},
-                            404);
-              return;
+            auto result = federation::make_join(*ctx.data, room_id, user_id);
+            if (result.contains("errcode")) {
+              int status = result.value("status_code", 400);
+              ruma::respond(res, result, status);
+            } else {
+              ruma::respond(res, result, 200);
             }
-            // Build a basic join event template. The remote will sign and
-            // re-send via /send_join. We do not include full prev_events
-            // here — that is appended during /send_join's state/auth_chain
-            // merge step.
-            nlohmann::json event = {
-                {"type", "m.room.member"},
-                {"content", {{"membership", "join"}}},
-                {"room_id", room_id},
-                {"sender", user_id},
-                {"state_key", user_id},
-            };
-            ruma::respond(res,
-                          ruma::json{{"room_version", "1"},
-                                     {"event", std::move(event)}},
-                          200);
           });
 
-
-  svr.Get(R"(/_matrix/federation/v1/send_join/([^/]+)/([^/]+))",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+  // PUT /_matrix/federation/v2/send_join/<roomId>/<eventId>
+  svr.Put(R"(/_matrix/federation/v2/send_join/([^/]+)/([^/]+))",
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const std::string room_id = url_decode(req.matches[1]);
-            if (ctx.data->room_state(room_id).empty()) {
+            const std::string event_id = url_decode(req.matches[2]);
+            nlohmann::json body;
+            try {
+              body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+            } catch (...) {
+              body = nlohmann::json::object();
+            }
+            if (body.is_discarded() || !body.is_object()) {
               ruma::respond(res,
-                            ruma::json{{"errcode", "M_NOT_FOUND"},
-                                       {"error", "Room not found."}},
-                            404);
+                            ruma::json{{"errcode", "M_BAD_JSON"}, {"error", "Invalid JSON"}},
+                            400);
               return;
             }
-            auto state = ctx.data->federation_full_state(room_id);
-            std::vector<std::string> state_ids;
-            for (const auto& p : state)
-              if (p.contains("event_id"))
-                state_ids.push_back(p["event_id"].get<std::string>());
-            auto auth_chain =
-                ctx.data->federation_auth_chain(room_id, state_ids);
-            ruma::respond(res,
-                          ruma::json{{"auth_chain", auth_chain}, {"state", state}},
-                          200);
+            // Ensure event_id matches
+            if (body.contains("event_id") && body.value("event_id", "") != event_id) {
+              ruma::respond(res,
+                            ruma::json{{"errcode", "M_INVALID_PARAM"},
+                                       {"error", "Event ID in body must match path parameter."}},
+                            400);
+              return;
+            }
+            auto result = federation::send_join(*ctx.data, room_id, body);
+            if (result.contains("errcode")) {
+              int status = result.value("status_code", 400);
+              ruma::respond(res, result, status);
+            } else {
+              ruma::respond(res, result, 200);
+            }
           });
 
+  // POST /_matrix/federation/v1/publicRooms
+  // This is the federation version of the public rooms directory
+  svr.Post("/_matrix/federation/v1/publicRooms",
+           [&ctx, &require_federation_auth](const httplib::Request& req,
+                                            httplib::Response& res) {
+             if (!require_federation_auth(req, res)) return;
+             nlohmann::json body;
+             try {
+               body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+             } catch (...) {
+               body = nlohmann::json::object();
+             }
+             if (body.is_discarded()) body = nlohmann::json::object();
+             auto result = federation::get_public_rooms_federation(*ctx.data, body);
+             if (result.contains("errcode")) {
+               int status = result.value("status_code", 400);
+               ruma::respond(res, result, status);
+             } else {
+               ruma::respond(res, result, 200);
+             }
+           });
+  // Restored in 115 (lost in the 112 edit): federation event/backfill/
+  // state_ids routes, now behind the ServerSignatures guard like upstream.
   svr.Get(R"(/_matrix/federation/v1/state_ids/([^/]+)/([^/]+))",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const std::string room_id = url_decode(req.matches[1]);
             auto state_ids = ctx.data->room_state(room_id);
-            std::set<std::string> auth_ids;
-            for (const auto& p :
-                 ctx.data->federation_auth_chain(room_id, state_ids))
-              if (p.contains("event_id")) auth_ids.insert(p["event_id"].get<std::string>());
+            // NEW in 68cc743f: use the shared get_auth_chain helper instead
+            // of fetching full PDUs only to extract their ids.
+            std::set<std::string> auth_ids =
+                federation::get_auth_chain(*ctx.data, state_ids);
             ruma::json out = ruma::json::object();
             out["auth_chain_ids"] = nlohmann::json::array();
             for (const auto& id : auth_ids) out["auth_chain_ids"].push_back(id);
@@ -2268,7 +3236,9 @@ int main(int argc, char** argv) {
           });
 
   svr.Get(R"(/_matrix/federation/v1/event/([^/]+))",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const std::string event_id = url_decode(req.matches[1]);
             if (auto t = ctx.data->pdu_get(event_id)) {
               try {
@@ -2283,14 +3253,95 @@ int main(int argc, char** argv) {
           });
 
   svr.Get(R"(/_matrix/federation/v1/backfill/([^/]+))",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const std::string room_id = url_decode(req.matches[1]);
             auto pdus = ctx.data->federation_pdus_of_room(room_id);
             ruma::respond(res, ruma::json{{"pdus", pdus}}, 200);
           });
 
+  // NEW in 67f9592b: federation event authorization chain.
+  // GET /_matrix/federation/v1/event_auth/:roomId/:eventId -> {auth_chain}.
+  svr.Get(R"(/_matrix/federation/v1/event_auth/([^/]+)/([^/]+))",
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
+            const std::string room_id = url_decode(req.matches[1]);
+            const std::string event_id = url_decode(req.matches[2]);
+            auto result = federation::get_event_auth(*ctx.data, room_id, event_id);
+            if (result.contains("errcode")) {
+              ruma::respond(res, result, 404);
+            } else {
+              ruma::respond(res, result, 200);
+            }
+          });
+
+  // NEW in 8773e501: incoming invites over federation.
+  // PUT /_matrix/federation/v[12]/invite/:roomId/:eventId - the inviting
+  // server sends {event, invite_room_state, room_version}; we validate, sign
+  // as the receiving server, store membership+invite_state, and return the
+  // signed {event}. Rejects room_version < 6 like upstream.
+  auto invite_handler = [&ctx, &require_federation_auth](const httplib::Request& req,
+                                                     httplib::Response& res) {
+    if (!require_federation_auth(req, res)) return;
+    const std::string room_id = url_decode(req.matches[1]);
+    nlohmann::json body;
+    try {
+      body = nlohmann::json::parse(req.body.empty() ? "{}" : req.body, nullptr, false);
+    } catch (...) {
+      body = nlohmann::json::object();
+    }
+    if (body.is_discarded() || !body.is_object()) {
+      ruma::respond(res,
+                    ruma::json{{"errcode", "M_BAD_JSON"}, {"error", "Invalid JSON"}},
+                    400);
+      return;
+    }
+    std::string room_version;
+    if (body.contains("room_version")) {
+      if (body["room_version"].is_string()) room_version = body["room_version"].get<std::string>();
+      else if (body["room_version"].is_number_integer()) room_version = std::to_string(body["room_version"].get<int>());
+    }
+    if (!room_version.empty()) {
+      int vnum = 0;
+      std::string digits;
+      for (char c : room_version)
+        if (c >= '0' && c <= '9') digits += c;
+      try { vnum = digits.empty() ? 0 : std::stoi(digits); } catch (...) { vnum = 0; }
+      if (vnum != 0 && vnum < 6) {
+        ruma::respond(res,
+                      ruma::json{{"errcode", "M_INCOMPATIBLE_ROOM_VERSION"},
+                                 {"error", "Server does not support this room version."}},
+                      400);
+        return;
+      }
+    }
+    if (!body.contains("event") || !body["event"].is_object()) {
+      ruma::respond(res,
+                    ruma::json{{"errcode", "M_INVALID_PARAM"},
+                               {"error", "Invite event is invalid."}},
+                    400);
+      return;
+    }
+    nlohmann::json event = body["event"];
+    nlohmann::json invite_state = body.value("invite_room_state", nlohmann::json::array());
+    auto result = ctx.data->handle_incoming_invite(room_id, std::move(event), std::move(invite_state));
+    if (!result.ok) {
+      ruma::respond(res,
+                    ruma::json{{"errcode", result.errcode}, {"error", result.error}},
+                    400);
+      return;
+    }
+    ruma::respond(res, nlohmann::json{{"event", result.event}}, 200);
+  };
+  svr.Put(R"(/_matrix/federation/v1/invite/([^/]+)/([^/]+))", invite_handler);
+  svr.Put(R"(/_matrix/federation/v2/invite/([^/]+)/([^/]+))", invite_handler);
+
   svr.Get(R"(/_matrix/federation/v1/query/directory)",
-          [&ctx](const httplib::Request& req, httplib::Response& res) {
+          [&ctx, &require_federation_auth](const httplib::Request& req,
+                                           httplib::Response& res) {
+            if (!require_federation_auth(req, res)) return;
             const auto it = req.params.find("room_alias");
             if (it == req.params.end()) {
               ruma::respond(res,

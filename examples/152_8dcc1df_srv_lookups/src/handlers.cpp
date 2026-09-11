@@ -6,6 +6,7 @@
 //             no account -> M_FORBIDDEN "" 403 (both verbatim upstream).
 
 #include "routes.hpp"
+#include "appservice_server.hpp"
 #include "utils.hpp"
 
 #include <argon2.h>
@@ -104,6 +105,9 @@ ruma::MatrixResult<ruma::RegisterResponse> register_route(
   ctx->data->device_add(user_id, device_id);
   const std::string token = new_token();
   ctx->data->token_replace(user_id, device_id, token);
+
+  // NEW in 6e36081: log user registration
+  std::clog << "[info] " << user_id << " registered on this server\n";
 
   return ruma::MatrixResult<ruma::RegisterResponse>::ok(ruma::RegisterResponse{
       .access_token = token,

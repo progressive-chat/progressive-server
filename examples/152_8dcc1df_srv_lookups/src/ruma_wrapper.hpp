@@ -29,6 +29,8 @@ enum class ErrorKind {
   Unknown,
   NotFound,
   InvalidParam,      // NEW in fa9e127a
+  BadJson,           // NEW in f62258ba (power_level_content_override parse)
+  NotJson,           // NEW in 699f7767 (invalid UTF-8 / non-JSON request body)
   UserDeactivated,   // NEW in b8193984
   MissingToken,
   UnknownToken,
@@ -121,6 +123,14 @@ struct SyncResponse {
   std::map<std::string, SyncResponse> joined;
   std::map<std::string, SyncResponse> invited;
   std::vector<std::string> stripped_state;
+  // NEW in 8f27e61 (folded prerequisite dd68031): ephemeral events (m.receipt).
+  std::vector<std::string> ephemeral_events;
+  // NEW in f12fbca: state events carried in /sync (full state on initial
+  // sync, timeline-deduplicated state on incremental syncs).
+  std::vector<std::string> state_events;
+  // NEW in 662a0cf1: per-room unread counts served as unread_notifications.
+  uint64_t notification_count = 0;
+  uint64_t highlight_count = 0;
 };
 
 // NEW in 23cb550d: GET /_matrix/client/r0/rooms/<id>/messages
@@ -143,7 +153,9 @@ struct CreateRoomRequest {
   std::optional<std::string> name;
   std::optional<std::string> topic;
   std::vector<std::string> invite;
-  std::string visibility;         // NEW in 3aa0c8ed: "public" | "private"
+  bool is_direct = false;         // NEW in 58463bba: direct-message room flag
+  std::optional<nlohmann::json> power_level_content_override;  // NEW in f62258ba
+  std::optional<std::string> visibility;         // NEW in 3aa0c8ed: "public" | "private"
   std::optional<std::string> room_alias_name;  // NEW in 3aa0c8ed
   std::string user_id;  // resolved from token
 };
@@ -205,6 +217,38 @@ struct GetMemberEventsRequest {
   std::string room_id;  // path param
 };
 
+// NEW in 2479389: presence routes.
+// PUT /_matrix/client/r0/presence/{userId}/status
+struct SetPresenceRequest {
+  static constexpr bool REQUIRES_AUTH = true;
+  std::string user_id;  // path param (must equal token user)
+  std::string presence;  // "online" | "offline" | "unavailable"
+  std::optional<std::string> status_msg;
+};
+
+// GET /_matrix/client/r0/presence/{userId}/status
+struct GetPresenceRequest {
+  static constexpr bool REQUIRES_AUTH = true;
+  std::string user_id;  // path param
+};
+
+// Response fields shared by both presence routes.
+struct GetPresenceResponse {
+  std::string presence = "offline";
+  std::optional<std::string> status_msg;
+  std::optional<bool> currently_active;
+  std::optional<uint64_t> last_active_ago;  // milliseconds
+};
+
+// NEW in 8f27e61 (folded prerequisite dd68031): POST
+// /_matrix/client/r0/rooms/{roomId}/receipt/{receiptType}/{eventId}
+struct CreateReceiptRequest {
+  static constexpr bool REQUIRES_AUTH = true;
+  std::string room_id;
+  std::string receipt_type;
+  std::string event_id;
+};
+
 struct PublicRoomsResponse {
   nlohmann::json chunk = nlohmann::json::array();
   size_t total_room_count_estimate = 0;
@@ -233,6 +277,7 @@ json to_json(const GetSupportedVersionsResponse& r);
 json to_json(const GetAliasResponse& r);
 json to_json(const JoinRoomByIdResponse& r);
 json to_json(const CreateMessageEventResponse& r);
+json to_json(const GetPresenceResponse& r);
 json to_error_json(const Error& e);
 
 void respond(httplib::Response& res, const json& body, int status = 200);

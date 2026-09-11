@@ -2,21 +2,21 @@
 
 Source: [`timokoesters/conduit@88cf043`](https://github.com/timokoesters/conduit/commit/88cf043) (2021-05-30)
 
+Upstream switches password handling to `Option` so deactivated accounts
+(those without a password) are properly deactivated, and tweaks the media
+`Content-Disposition` filename.
+
 ## What changed vs step 139
 
-| Rust change | C++ translation |
-|---|---|
-| **Deactivate accounts that should be** | **Translated** — Account deactivation fix |
-| **Major media refactor** | **Translated** — Cleaner media code |
-
-## Implementation details
-
-1. **Account deactivation fix** — Deactivate accounts that should be deactivated
-2. **Major media refactor** — Major refactor of media database
+**Nothing in `src/` — this directory was a byte-identical copy.** This port
+marks deactivated accounts with an empty password string (upstream
+convention since step 23) and its account-deactivation flow already removes
+devices and blanks the password, so the `Option` refactor has no behavior
+to translate.
 
 ## Smoke test
 
 ```console
-$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-$ ./build/server & ./build/tests
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
+$ ./build/server --port 8000 --data-dir /tmp/conduit140 && ./build/tests
 ```

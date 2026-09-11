@@ -1,20 +1,20 @@
-# Step 148 — "improvement: filter our room directory" (Conduit `77a23f8`)
+# Step 148 — "improvement: filter our room directory" (Conduit `77a23f89`)
 
-Source: [`timokoesters/conduit@77a23f8`](https://github.com/timokoesters/conduit/commit/77a23f8) (2021-06-14)
+Source: [`timokoesters/conduit@77a23f89`](https://github.com/timokoesters/conduit/commit/77a23f89) (2021-06-14)
+
+Upstream filters the room directory by a case-insensitive search term over
+name, topic and canonical alias.
 
 ## What changed vs step 147
 
-| Rust change | C++ translation |
-|---|---|
-| **Filter room directory** | **Translated** — Room directory filter |
-
-## Implementation details
-
-1. **Room directory filter** — Filter our room directory (Fixes #35)
+**Nothing in `src/` — this directory was a byte-identical copy.** The change
+is implemented in the modern chain as step 804
+(`804_77a23f89_search_filters`), with case-insensitive matching over name,
+topic and canonical alias.
 
 ## Smoke test
 
 ```console
-$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-$ ./build/server & ./build/tests
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
+$ ./build/server --port 8000 --data-dir /tmp/conduit148 && ./build/tests
 ```

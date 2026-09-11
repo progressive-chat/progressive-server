@@ -2,19 +2,17 @@
 
 Source: [`timokoesters/conduit@3408d74`](https://github.com/timokoesters/conduit/commit/3408d74) (2021-05-05)
 
+Upstream documents the `trusted_servers` TOML key and deploy guide entry.
+
 ## What changed vs step 123
 
-| Rust change | C++ translation |
-|---|---|
-| **trusted_servers config** | **Translated** — trusted_servers config |
-
-## Implementation details
-
-1. **trusted_servers config** — Add trusted_servers to config and deploy guide
+**Nothing in `src/` — this directory was a byte-identical copy.** Docs and
+example-config only; this port has no TOML config layer and no trusted-server
+concept, so there is nothing to translate.
 
 ## Smoke test
 
 ```console
-$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-$ ./build/server & ./build/tests
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
+$ ./build/server --port 8000 --data-dir /tmp/conduit124 && ./build/tests
 ```

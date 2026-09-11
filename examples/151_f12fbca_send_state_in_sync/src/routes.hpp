@@ -5,9 +5,21 @@
 
 #include "data.hpp"
 #include "ruma_wrapper.hpp"
+#include "waiting_servers.hpp"
+#include "appservice_server.hpp"
+
+// Forward declaration
+struct Context;
 
 struct Context {
   Data* data;
+  // NEW in ab33236: track servers with pending federation requests
+  // to avoid sending duplicate requests to servers that are already waiting
+  federation::WaitingServersTracker waiting_servers;
+  // NEW in 6e5b35e: appservice management
+  appservice::AppserviceManager appservice_manager;
+
+  Context(Data* d) : data(d), appservice_manager(*d) {}
 };
 
 std::optional<std::string> extract_token(const httplib::Request& req);

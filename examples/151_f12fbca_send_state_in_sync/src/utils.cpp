@@ -101,3 +101,37 @@ std::optional<std::string> calculate_hash(const std::string& password) {
 }
 
 }  // namespace utils
+
+// NEW in dd749b8: generate versioned keypair
+/// Returns a versioned keypair: 1 byte version (1) + 0xff + 32-byte Ed25519 key
+/// Version 1: 1 byte version (1) + 0xff + 32-byte Ed25519 key
+std::string utils::generate_keypair() {
+  std::string value = random_string(8);  // 8 bytes random prefix
+  value.push_back(static_cast<char>(0xff));
+  
+  // Version 1: 1 byte version (1) + 0xff + 32-byte Ed25519 key
+  value.push_back(static_cast<char>(1));  // version 1
+  value.push_back(static_cast<char>(0xff));
+  
+  // Generate Ed25519 keypair using our crypto library
+  // For now, generate random 32 bytes as placeholder
+  // In a full implementation, this would use crypto::generate_keypair()
+  std::string key = random_string(32);  // 32 bytes for Ed25519 key
+  value += key;
+  
+  return value;
+}
+
+
+// NEW in e8f67089/77a23f89: ASCII case-insensitive substring helpers.
+std::string utils::ascii_lower(std::string s) {
+  for (char& c : s)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  return s;
+}
+
+bool utils::icontains(const std::string& haystack, const std::string& needle_lower) {
+  if (needle_lower.empty()) return true;
+  std::string hay = ascii_lower(haystack);
+  return hay.find(needle_lower) != std::string::npos;
+}

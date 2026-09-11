@@ -101,10 +101,18 @@ namespace {
 struct Ed25519Key {
   EVP_PKEY* pkey = nullptr;
   explicit Ed25519Key(const std::string& seed) {
-    if (seed.size() == 32)
+    // NEW in 1f84013b: accept versioned keypairs (dd749b8 format: prefix bytes
+    // + raw 32-byte seed at the end). Previously only exact 32-byte seeds
+    // worked, so every signature made with a versioned keypair came out empty.
+    const unsigned char* raw = reinterpret_cast<const unsigned char*>(seed.data());
+    size_t len = seed.size();
+    if (len > 32) {
+      raw += len - 32;
+      len = 32;
+    }
+    if (len == 32)
       pkey = EVP_PKEY_new_raw_private_key(
-          EVP_PKEY_ED25519, nullptr,
-          reinterpret_cast<const unsigned char*>(seed.data()), seed.size());
+          EVP_PKEY_ED25519, nullptr, raw, len);
   }
   ~Ed25519Key() {
     if (pkey) EVP_PKEY_free(pkey);

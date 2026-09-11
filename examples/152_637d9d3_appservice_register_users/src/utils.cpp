@@ -122,3 +122,16 @@ std::string utils::generate_keypair() {
   return value;
 }
 
+
+// NEW in e8f67089/77a23f89: ASCII case-insensitive substring helpers.
+std::string utils::ascii_lower(std::string s) {
+  for (char& c : s)
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  return s;
+}
+
+bool utils::icontains(const std::string& haystack, const std::string& needle_lower) {
+  if (needle_lower.empty()) return true;
+  std::string hay = ascii_lower(haystack);
+  return hay.find(needle_lower) != std::string::npos;
+}

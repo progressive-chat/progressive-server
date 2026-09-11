@@ -1,9 +1,35 @@
 #include "sled.hpp"
 
+#include <rocksdb/cache.h>
+#include <rocksdb/table.h>
+
 #include <memory>
 #include <stdexcept>
 
 namespace sled {
+
+namespace {
+// NEW in 9d4fa9a2: size the shared block cache from db_cache_capacity_mb
+// (upstream default 200MB, replacing the 1GB cache_capacity).
+std::shared_ptr<rocksdb::Cache> make_block_cache(double db_cache_capacity_mb) {
+  if (!(db_cache_capacity_mb > 0)) db_cache_capacity_mb = 200.0;
+  size_t bytes =
+      static_cast<size_t>(db_cache_capacity_mb * 1024.0 * 1024.0);
+  if (bytes == 0) bytes = 1 << 20;
+  return rocksdb::NewLRUCache(bytes);
+}
+
+rocksdb::ColumnFamilyOptions cf_options_with_cache(
+    const std::shared_ptr<rocksdb::Cache>& cache) {
+  rocksdb::ColumnFamilyOptions cf_options;
+  cf_options.compression = rocksdb::kZSTD;
+  rocksdb::BlockBasedTableOptions table_options;
+  table_options.block_cache = cache;
+  cf_options.table_factory.reset(
+      rocksdb::NewBlockBasedTableFactory(table_options));
+  return cf_options;
+}
+}  // namespace
 
 std::optional<std::string> Tree::get(const std::string& key) const {
   std::string value;
@@ -94,8 +120,11 @@ std::vector<std::pair<std::string, std::string>> Tree::iter_all() const {
   return out;
 }
 
-Db Db::open(const std::filesystem::path& dir) {
+Db Db::open(const std::filesystem::path& dir, double db_cache_capacity_mb) {
   std::filesystem::create_directories(dir);
+
+  const std::shared_ptr<rocksdb::Cache> block_cache =
+      make_block_cache(db_cache_capacity_mb);
 
   // Reopening must describe every existing column family, so list them first.
   std::vector<std::string> existing;
@@ -106,7 +135,7 @@ Db Db::open(const std::filesystem::path& dir) {
 
   std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
   for (const std::string& name : existing) {
-    descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions());
+    descriptors.emplace_back(name, cf_options_with_cache(block_cache));
   }
 
   rocksdb::DBOptions db_options;
@@ -120,6 +149,7 @@ Db Db::open(const std::filesystem::path& dir) {
   rocksdb::DB* raw = db_ptr.release();
 
   Db db(raw);
+  db.block_cache_ = block_cache;
   for (size_t i = 0; i < handles.size(); ++i) {
     db.cfs_[handles[i]->GetName()] = handles[i];
   }
@@ -127,7 +157,9 @@ Db Db::open(const std::filesystem::path& dir) {
 }
 
 Db::Db(Db&& other) noexcept
-    : db_(other.db_), cfs_(std::move(other.cfs_)) {
+    : db_(other.db_),
+      cfs_(std::move(other.cfs_)),
+      block_cache_(std::move(other.block_cache_)) {
   other.db_ = nullptr;
 }
 
@@ -146,7 +178,7 @@ Tree Db::open_tree(const std::string& name) const {
 
   rocksdb::ColumnFamilyHandle* handle = nullptr;
   const rocksdb::Status status = db_->CreateColumnFamily(
-      rocksdb::ColumnFamilyOptions(), name, &handle);
+      cf_options_with_cache(block_cache_), name, &handle);
   if (!status.ok()) throw std::runtime_error("open_tree: " + status.ToString());
   cfs_[name] = handle;
   return Tree(db_, handle);

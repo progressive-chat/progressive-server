@@ -44,6 +44,10 @@ public:
     // Get appservice info
     std::optional<AppserviceRegistration> get_appservice(const std::string& appservice_id) const;
 
+    // NEW in 637d9d3: look up an appservice by its as_token (registration
+    // requests bearing a valid appservice token bypass a closed registry).
+    std::optional<AppserviceRegistration> find_by_as_token(const std::string& as_token) const;
+
     // Handle appservice transaction
     nlohmann::json handle_transaction(
         const std::string& appservice_id,

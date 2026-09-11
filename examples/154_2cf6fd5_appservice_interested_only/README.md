@@ -1,21 +1,19 @@
 # Step 154 — "improvement: don't send pdus to appservices if it isn't interested" (Conduit `2cf6fd5`)
 
-Source: [`timokoesters/conduit@2cf6fd5`](https://github.com/timokoesters/conduit/commit/2cf6fd5) (2020-12)
+Source: [`timokoesters/conduit@2cf6fd5`](https://github.com/timokoesters/conduit/commit/2cf6fd5) (2020-12-23)
+
+Upstream filters PDU delivery to appservices by namespace interest (user /
+alias / room regexes, bridge-user membership).
 
 ## What changed vs step 153
 
-| Rust change | C++ translation |
-|---|---|
-| Improvement: don't send PDUs to appservices if it isn't interested. Appservices register interest in specific event types/rooms; we only send matching events. | **Translated** — Our appservice dispatch (step 96) checks the appservice's `sender` field against the event's sender. A more granular namespace check is in step 98 (`308627113`). |
-
-## Implementation details
-
-- Our appservice dispatch (step 96) checks the appservice's `sender` field against the event's sender. A more granular namespace check is in step 98 (`308627113`).
-- No external Rust dependencies carried over (Cargo.toml changes are skipped)
+**Nothing in `src/` — this directory was a byte-identical copy.** This port
+stores appservice namespaces at registration but never forwards PDUs to
+appservices, so there is no delivery to filter.
 
 ## Smoke test
 
 ```console
-$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-$ ./build/server & ./build/tests
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
+$ ./build/server --port 8000 --data-dir /tmp/conduit154 && ./build/tests
 ```

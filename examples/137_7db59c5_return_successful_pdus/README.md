@@ -2,19 +2,20 @@
 
 Source: [`timokoesters/conduit@7db59c5`](https://github.com/timokoesters/conduit/commit/7db59c5) (2021-05-27)
 
+Upstream's federation `/send` handler returns per-PDU results for stored
+PDUs instead of a constant empty map.
+
 ## What changed vs step 136
 
-| Rust change | C++ translation |
-|---|---|
-| **Return successful PDUs in /send/:txnId** | **Translated** — Return successful PDUs |
-
-## Implementation details
-
-1. **Return successful PDUs** — Also return successful PDUs in /send/:txnId
+**Nothing in `src/` — this directory was a byte-identical copy.** The change
+is implemented in the modern chain as part of step 122
+(`122_ddcf1a71_redaction_send_receipts`), whose transaction handler returns
+`{event_id: {}}` per stored PDU and `{event_id: {errcode, error}}` per
+rejected one.
 
 ## Smoke test
 
 ```console
-$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-$ ./build/server & ./build/tests
+$ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
+$ ./build/server --port 8000 --data-dir /tmp/conduit137 && ./build/tests
 ```

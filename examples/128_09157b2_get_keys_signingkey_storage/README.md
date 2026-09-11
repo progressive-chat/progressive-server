@@ -1,37 +1,33 @@
 # Step 128 — "improvement: federation get_keys and optimize signingkey storage" (Conduit `09157b2`)
 
-Source: [`timokoesters/conduit@09157b2`](https://github.com/timokoesters/conduit/commit/09157b2) (2021-05-21)
+Source: [`timokoesters/conduit@09157b2`](https://github.com/timokoesters/conduit/commit/09157b2) (2021-05-20)
 
-Upstream fetches encryption keys over federation (`POST
-/_matrix/federation/v1/user/keys/query` + `get_keys_helper`), merges
-per-server signing-key documents instead of timeout-keyed rows, and rate
-limits bad events / signature fetches.
+Upstream merges per-server signing-key documents instead of timeout-keyed
+rows, persists fetched keys instead of discarding them, and rate limits bad
+events / signature fetches — plus federation E2EE `get_keys`, which needs a
+device-key store this port does not have yet.
+
+This directory used to be a byte-identical copy of the attempt-A base; it is
+rebuilt on the previous real step (127) and now really implements the
+portable parts.
 
 ## What changed vs step 127
 
-**Nothing in `src/` — verified identical.** Every hunk of the upstream
-commit needs foundations this era of the port does not have yet, or is
-Rust type-system churn with identical wire behavior:
-
 | Rust change | C++ translation |
 |---|---|
-| **`get_keys_helper` + federation `user/keys/query` route** | **No counterpart yet** — needs the E2EE device/cross-signing key store (`get_device_keys`, `get_master_key`, …), which does not exist at this point (only key *backup* routes exist). Landed upstream together with that store; porting the route alone would serve wrong (always-empty) answers |
-| **Signing-key storage optimization (`servertimeout_signingkey` → merged `server_signingkeys` doc)** | **No counterpart yet** — no signing-key fetching or storage exists at all here (only the static `/_matrix/key/v2/server` document this server serves about itself), so there is nothing to optimize. The fetching/storage layer arrives in later steps |
-| **Rate limit bad events / signature fetching (`bad_event_ratelimiter`, `back_off`)** | **No counterpart yet** — attaches to the signature-verifying event intake path, which does not exist here (`/send` appends without verification); the failures it skips cannot occur |
-| **`sync.rs` / `account_data.rs` / `edus.rs` / `pusher.rs` / `config.rs` / `read_marker.rs` ruma type migrations** (`AccountData` → `Room`/`GlobalAccountData`, `EduEvent` → `AnyEphemeralRoomEvent`, `Receipts{read}` → `BTreeMap<ReceiptType, …>`, `SystemTime` → `MilliSecondsSinceUnixEpoch`, `BasicEvent` → raw JSON) | **No-op** — this port hand-builds JSON with no ruma type layer; wire shapes are unchanged |
-| **`ruma_wrapper.rs` `sender_servername` plumbing** | **No counterpart** — carries the origin server name for the keys/query route above |
-| **Dep bumps (`Cargo.lock`, toolchain-adjacent)** | **Skipped** — dependency-only, per project rules |
-
-Like step 49, this is a faithful no-op: translating any single piece in
-isolation would produce dead or wrong code.
-
-Note: this directory (like many others) carries stray recursive copies of
-earlier steps (`45_*`, `47_*`, `51_*`) that were swept in by `git add`;
-they are unreferenced by the build and tracked for repo-wide cleanup later.
+| **Merged `server_signingkeys` doc (`verify_keys` + `old_verify_keys`) replacing timeout rows** | **Implemented** — `server_signingkeys` tree (`server -> JSON doc`); `get_signing_keys()` serves both maps, `add_signing_key()` merges via read-modify-write |
+| **Persist fetched keys (`add_signing_key` on fetch)** | **Implemented** — `verify_federation_request` stores live-fetched keys; previously every request re-fetched |
+| **`bad_event_ratelimiter` + `back_off` (30s·tries², capped 24h)** | **Implemented** — in-memory map behind a mutex; `fetch_and_handle_events` skips backed-off ids and records federation-fetch failures |
+| **`bad_signature_ratelimiter` + `back_off` on fetch failure** | **Implemented** — keyed by origin+key id around the live key fetch in `verify_federation_request` |
+| **Federation E2EE `get_keys` / `get_keys_helper`** | **Deferred** — needs the device/cross-signing key store, which does not exist in this port (only key *backup* routes exist) |
+| **Per-server request semaphore (`servername_ratelimiter`)** | **Skipped** — bounds concurrent async reqwest requests; this port's blocking clients need no equivalent |
+| **ruma type churn (`AccountData` splits, `Receipts` map, `MilliSecondsSinceUnixEpoch`)** | **No-op** — hand-built JSON is unaffected |
 
 ## Smoke test
 
 ```console
 $ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DHTTPLIB_USE_ZSTD_IF_AVAILABLE=OFF -DFETCHCONTENT_BASE_DIR=/home/user/deps-cache && cmake --build build -j
-$ ./build/server --port 8000 --data-dir /tmp/conduit128 && ./build/tests
+$ ./build/server --port 8000 --data-dir /tmp/conduit128
+# normal registration still works and federation requests verify:
+$ curl -s http://127.0.0.1:8000/_matrix/client/versions
 ```

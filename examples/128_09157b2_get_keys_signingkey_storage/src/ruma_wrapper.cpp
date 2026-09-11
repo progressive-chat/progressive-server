@@ -1,5 +1,7 @@
 #include "ruma_wrapper.hpp"
 
+#include <iostream>
+
 namespace ruma {
 
 const char* errcode(ErrorKind kind) {
@@ -11,6 +13,8 @@ const char* errcode(ErrorKind kind) {
     case ErrorKind::NotFound: return "M_NOT_FOUND";
     case ErrorKind::UserDeactivated: return "M_USER_DEACTIVATED";
     case ErrorKind::InvalidParam: return "M_INVALID_PARAM";
+    case ErrorKind::BadJson: return "M_BAD_JSON";
+    case ErrorKind::NotJson: return "M_NOT_JSON";
   }
   return "M_UNKNOWN";
 }
@@ -147,6 +151,8 @@ void respond_result(httplib::Response& res, const MatrixResult<T>& result,
     respond(res, serialize(std::get<0>(result.result)));
   } else {
     const Error& e = std::get<1>(result.result);
+    // NEW in f62258ba: log every error response (upstream error.rs warn!).
+    std::cerr << "[warn] " << e.status_code << ": " << e.message << "\n";
     respond(res, to_error_json(e), e.status_code);
   }
 }
@@ -204,12 +210,19 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
     json timeline = {{"events", std::move(events)},
                      {"prev_batch", room.prev_batch}};
     if (room.limited) timeline["limited"] = true;
+    // NEW in 662a0cf1: stored notification/highlight counts (upstream
+    // unread_notifications), replacing PDU scans since last read.
+    json unread = {{"notification_count", room.notification_count},
+                   {"highlight_count", room.highlight_count}};
+    // NEW in 8f27e61: read-receipt EDUs travel as ephemeral room events.
+    json ephemeral = json::array();
+    for (const auto& ev : room.ephemeral_events) ephemeral.push_back(json::parse(ev));
     return json{
         {"account_data", {{"events", json::array()}}},
-        {"ephemeral", {{"events", json::array()}}},
+        {"ephemeral", {{"events", std::move(ephemeral)}}},
         {"state", {{"events", json::array()}}},
         {"summary", json::object()},
-        {"unread_notifications", json::object()},
+        {"unread_notifications", std::move(unread)},
         {"timeline", std::move(timeline)},
     };
   };
@@ -232,7 +245,8 @@ void respond(httplib::Response& res, const MatrixResult<SyncResponse>& result) {
   // NEW in b4d65ab6: rooms whose timeline AND state are empty are skipped —
   // clients treat their absence as "nothing changed since last sync".
   auto room_is_empty = [](const SyncResponse& room) {
-    return room.timeline_events.empty() && room.stripped_state.empty();
+    return room.timeline_events.empty() && room.stripped_state.empty() &&
+           room.ephemeral_events.empty();
   };
 
   json join = json::object();
@@ -297,6 +311,10 @@ Ruma<CreateRoomRequest> Ruma<CreateRoomRequest>::from_request(const httplib::Req
       if (auto it = body.find("invite"); it != body.end() && it->is_array())
         for (const auto& u : *it)
           if (u.is_string()) wrapper.value.invite.push_back(u.get<std::string>());
+      if (auto it = body.find("is_direct"); it != body.end() && it->is_boolean())
+        wrapper.value.is_direct = it->get<bool>();
+      if (auto it = body.find("power_level_content_override"); it != body.end())
+        wrapper.value.power_level_content_override = *it;
       if (auto it = body.find("visibility"); it != body.end() && it->is_string())
         wrapper.value.visibility = it->get<std::string>();
       if (auto it = body.find("room_alias_name"); it != body.end() && it->is_string())
@@ -372,6 +390,41 @@ Ruma<SetDisplaynameRequest> Ruma<SetDisplaynameRequest>::from_request(
     }
   }
   return wrapper;
+}
+
+// NEW in 2479389: presence route parsing.
+template <>
+Ruma<SetPresenceRequest> Ruma<SetPresenceRequest>::from_request(
+    const httplib::Request& req) {
+  Ruma<SetPresenceRequest> wrapper;
+  if (!req.body.empty()) {
+    const json body = json::parse(req.body, nullptr, false);
+    if (!body.is_discarded() && body.is_object()) {
+      if (auto it = body.find("presence"); it != body.end() && it->is_string())
+        wrapper.value.presence = it->get<std::string>();
+      if (auto it = body.find("status_msg"); it != body.end() && it->is_string())
+        wrapper.value.status_msg = it->get<std::string>();
+    }
+  }
+  return wrapper;
+}
+
+// NEW in 8f27e61: the receipt route takes no JSON body; the caller fills the
+// path params (room_id / receipt_type / event_id) from req.matches.
+template <>
+Ruma<CreateReceiptRequest> Ruma<CreateReceiptRequest>::from_request(
+    const httplib::Request&) {
+  Ruma<CreateReceiptRequest> wrapper;
+  return wrapper;
+}
+
+json to_json(const GetPresenceResponse& r) {
+  json out = json::object();
+  out["presence"] = r.presence;
+  if (r.status_msg.has_value()) out["status_msg"] = *r.status_msg;
+  if (r.currently_active.has_value()) out["currently_active"] = *r.currently_active;
+  if (r.last_active_ago.has_value()) out["last_active_ago"] = *r.last_active_ago;
+  return out;
 }
 
 }  // namespace ruma

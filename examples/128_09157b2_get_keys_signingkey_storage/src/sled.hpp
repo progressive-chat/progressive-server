@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -60,7 +61,12 @@ class Tree {
 
 class Db {
  public:
-  static Db open(const std::filesystem::path& dir);
+  // NEW in 9d4fa9a2: the DB block cache is configurable in megabytes
+  // (upstream renamed `cache_capacity` (bytes, 1GB default) to
+  // `db_cache_capacity_mb` (200MB default)). Non-positive values fall back
+  // to the default.
+  static Db open(const std::filesystem::path& dir,
+                 double db_cache_capacity_mb = 200.0);
 
   // Non-copyable (owns raw handles); movable not needed here.
   Db(const Db&) = delete;
@@ -80,6 +86,9 @@ class Db {
 
   rocksdb::DB* db_;
   mutable std::map<std::string, rocksdb::ColumnFamilyHandle*> cfs_;
+  // NEW in 9d4fa9a2: shared block cache sized from db_cache_capacity_mb,
+  // reused for lazily created column families in open_tree().
+  std::shared_ptr<rocksdb::Cache> block_cache_;
 };
 
 }  // namespace sled
